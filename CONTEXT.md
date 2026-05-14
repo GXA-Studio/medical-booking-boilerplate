@@ -132,7 +132,7 @@ INTERNAL_API_SECRET=         # 32-byte random hex, used to validate internal cal
 | 2 | Database schema (`001_initial.sql`) — multi-shift schedules, EXCLUDE constraint, RPCs, RLS | ✅ Done |
 | 3 | Route Handlers (`/api/otp/send`, `/api/otp/verify`, `/api/slots`, `/api/webhooks/twilio`) | ✅ Done |
 | 4 | Admin Dashboard (Supabase Auth, services/doctors/schedules CRUD, appointment calendar) | ✅ Done |
-| 5 | Patient Booking Flow (animated step-by-step with framer-motion, OTP modal) | ⏳ Pending |
+| 5 | Patient Booking Flow (animated step-by-step with framer-motion, OTP modal) | ✅ Done |
 
 ---
 
@@ -149,8 +149,83 @@ INTERNAL_API_SECRET=         # 32-byte random hex, used to validate internal cal
 
 ---
 
-## Next Action
+## Patient Booking Flow — Component Inventory (Step 5)
 
-**Step 5**: Patient Booking Flow — animated multi-step UI at `app/[clinicSlug]/`.  
-Steps: Service selection → Doctor selection → Date + slot picker → Patient details → OTP verification modal.  
-Stack: framer-motion AnimatePresence for step transitions, `/api/otp/send`, `/api/otp/verify`, `/api/slots`.
+| Component | Responsibility |
+|---|---|
+| `app/(booking)/[clinicSlug]/layout.tsx` | Sticky header with clinic name |
+| `app/(booking)/[clinicSlug]/page.tsx` | Server: fetch clinic + active services + active doctors |
+| `components/booking/booking-wizard.tsx` | Orchestrator: global state, progress bar (framer-motion), AnimatePresence |
+| `components/booking/step-service.tsx` | Service cards (duration, price, doctor count) |
+| `components/booking/step-doctor.tsx` | Doctor cards with initials avatar |
+| `components/booking/step-slot.tsx` | 14-day date strip + slot grid (fetches `/api/slots`, timezone-aware) |
+| `components/booking/step-patient.tsx` | Name + E.164 phone + **GDPR/RGPD consent block + mandatory checkbox** |
+| `components/booking/step-otp.tsx` | 6 individual inputs with auto-advance, paste, 60s resend cooldown |
+| `components/booking/step-confirmed.tsx` | Spring-animated success state + booking summary card |
+
+---
+
+## ⚠️ ESTADO PARA LA NUEVA SESIÓN
+
+**El codebase está COMPLETO.** Todos los pasos (1–5) están implementados y commiteados.  
+No escribir código nuevo hasta completar los dos pasos de calidad siguientes en orden estricto:
+
+### Paso A — Regenerar tipos TypeScript (BLOQUEANTE)
+
+Hay 50 errores de TypeScript activos. Son **exclusivamente** errores de inferencia de Supabase
+(`TS2339: never`) causados por el archivo `lib/supabase/types.ts` escrito a mano. Se resuelven
+en su totalidad ejecutando el siguiente comando contra la base de datos de producción:
+
+```bash
+npx supabase gen types typescript \
+  --project-id eeqmtmryyqdacjcrrkwd \
+  --schema public \
+  > lib/supabase/types.ts
+```
+
+Si el comando falla por permisos de Management API, usar la alternativa con la URL directa:
+
+```bash
+SUPABASE_ACCESS_TOKEN=<personal_access_token> \
+npx supabase gen types typescript \
+  --project-id eeqmtmryyqdacjcrrkwd \
+  > lib/supabase/types.ts
+```
+
+Tras regenerar: ejecutar `npx tsc --noEmit`. El resultado esperado es **0 errores**.  
+Luego hacer commit: `fix(types): regenerate from live supabase schema`.
+
+### Paso B — Auditoría E2E con Playwright
+
+Crear `tests/booking-flow.spec.ts` que cubra el embudo completo de conversión:
+
+1. Navegar a `/<clinicSlug>`
+2. Seleccionar servicio → médico → slot → datos de paciente
+3. Verificar que el checkbox RGPD es obligatorio (no envía sin él)
+4. Mock del endpoint `/api/otp/send` (no enviar SMS reales en tests)
+5. Verificar que los 6 inputs OTP aceptan pegado y auto-avanzan el foco
+6. Mock de `/api/otp/verify` → verificar que se muestra `step-confirmed`
+
+Instalar Playwright si no está: `npm init playwright@latest`.
+
+---
+
+## Git — Estado del Repositorio
+
+| Commit | Hash | Descripción |
+|---|---|---|
+| 1 | `0d0b462` | chore(init): setup nextjs structure, db schema and context |
+| 2 | `87e4bf8` | fix(security): apply ruflo audit patches (C-01 through M-04) |
+| 3 | `e438e36` | feat(admin): complete admin dashboard |
+| 4 | `a7ff83d` | fix(admin): make timezone dynamic |
+| 5 | `b3a116f` | feat(booking): add patient booking flow + fix TypeScript types |
+| 6 | `(handoff)` | chore(context): prepare handoff state |
+
+**Remote**: `https://github.com/GXA-Studio/medical-booking-boilerplate.git`  
+**Push pendiente**: La CLI de gh está autenticada como `automatizacionesibiza`, no como `GXA-Studio`.  
+Para desbloquear el push en la nueva sesión, ejecutar primero:
+
+```bash
+! gh auth login   # login con la cuenta GXA-Studio o añadir token con permisos push
+git push -u origin main
+```
