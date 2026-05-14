@@ -10,9 +10,12 @@ export default async function AppointmentsPage({
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase
-    .from('profiles').select('clinic_id').eq('id', user!.id).single()
+    .from('profiles').select('clinic_id, clinics(timezone)').eq('id', user!.id).single()
 
   const clinicId = profile?.clinic_id ?? ''
+  const timezone = (profile?.clinics as { timezone: string } | null)?.timezone
+    ?? process.env.NEXT_PUBLIC_DEFAULT_TIMEZONE
+    ?? 'UTC'
 
   let query = supabase
     .from('appointments')
@@ -46,7 +49,7 @@ export default async function AppointmentsPage({
           Historial y gestión de todas las citas de la clínica.
         </p>
       </div>
-      <AppointmentsTable appointments={appointments ?? []} />
+      <AppointmentsTable appointments={appointments ?? []} timezone={timezone} />
     </div>
   )
 }

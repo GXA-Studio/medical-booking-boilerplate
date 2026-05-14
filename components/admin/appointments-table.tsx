@@ -48,15 +48,21 @@ const STATUS_VARIANTS: Record<AppointmentStatus, 'secondary' | 'success' | 'dest
   cancelled: 'destructive',
 }
 
-function formatDateTime(iso: string) {
+function formatDateTime(iso: string, timezone: string) {
   return new Date(iso).toLocaleString('es-MX', {
     dateStyle: 'short',
     timeStyle: 'short',
-    timeZone: 'America/Mexico_City',
+    timeZone: timezone,
   })
 }
 
-export function AppointmentsTable({ appointments: initial }: { appointments: AppointmentRow[] }) {
+export function AppointmentsTable({
+  appointments: initial,
+  timezone,
+}: {
+  appointments: AppointmentRow[]
+  timezone: string
+}) {
   const router      = useRouter()
   const pathname    = usePathname()
   const searchParams = useSearchParams()
@@ -188,7 +194,7 @@ export function AppointmentsTable({ appointments: initial }: { appointments: App
                   <TableCell>
                     <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                       <CalendarDays className="h-3.5 w-3.5 shrink-0" />
-                      {formatDateTime(a.starts_at)}
+                      {formatDateTime(a.starts_at, timezone)}
                     </div>
                   </TableCell>
                   <TableCell>
