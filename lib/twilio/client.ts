@@ -79,16 +79,30 @@ export interface SendWhatsAppConfirmationParams {
 export async function sendWhatsAppConfirmation({
   to, patientName, clinicName, doctorName, startsAt, timezone, cancellationToken, baseUrl,
 }: SendWhatsAppConfirmationParams): Promise<void> {
-  const dateStr = formatSmsDateTime(startsAt, timezone)
-  await getClient().messages.create({
-    to:   `whatsapp:${to}`,
-    from: WHATSAPP_FROM,
-    body:
-      `¡Hola ${patientName}! Cita confirmada en ${clinicName}.\n` +
-      `Especialista: ${doctorName}. Fecha: ${dateStr}.\n\n` +
-      `🔗 Cancelar con un clic: ${baseUrl}/cancel/${cancellationToken}\n\n` +
-      `Nota legal (AEPD): Tratamos tus datos según el RGPD. +info en nuestra web o responde a este chat.`,
-  })
+  const dateStr  = formatSmsDateTime(startsAt, timezone)
+  const toWa     = `whatsapp:${to}`
+  const msgBody  =
+    `¡Hola ${patientName}! Cita confirmada en ${clinicName}.\n` +
+    `Especialista: ${doctorName}. Fecha: ${dateStr}.\n\n` +
+    `🔗 Cancelar con un clic: ${baseUrl}/cancel/${cancellationToken}\n\n` +
+    `Nota legal (AEPD): Tratamos tus datos según el RGPD. +info en nuestra web o responde a este chat.`
+
+  const payload = { to: toWa, from: WHATSAPP_FROM, body: msgBody }
+  console.log('[Twilio WA] sendWhatsAppConfirmation → payload:', JSON.stringify(payload))
+
+  try {
+    const msg = await getClient().messages.create(payload)
+    console.log('[Twilio WA] Message queued → SID:', msg.sid, '| Status:', msg.status, '| ErrorCode:', msg.errorCode)
+  } catch (err: unknown) {
+    const e = err as { status?: number; code?: number; message?: string; moreInfo?: string }
+    console.error('[Twilio WA] API error →', JSON.stringify({
+      httpStatus: e.status,
+      twilioCode: e.code,
+      message:    e.message,
+      moreInfo:   e.moreInfo,
+    }))
+    throw err
+  }
 }
 
 export interface SendWhatsAppReminderParams {

@@ -9,6 +9,16 @@ function stripWhatsappPrefix(from: string): string {
   return from.replace(/^whatsapp:/, '')
 }
 
+// Reconstruct the exact public URL Twilio signed.
+// req.url in Next.js App Router on Vercel is the internal URL (http://...) —
+// not what Twilio called. We must use the forwarded headers to get the real one.
+function buildWebhookUrl(req: NextRequest): string {
+  const proto = req.headers.get('x-forwarded-proto') ?? 'https'
+  const host  = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? ''
+  // Strip any accidental trailing slash from host and use only the path
+  return `${proto}://${host}/api/webhooks/whatsapp`
+}
+
 // POST /api/webhooks/whatsapp
 //
 // Handles inbound WhatsApp messages from Twilio Sandbox.
@@ -17,15 +27,14 @@ function stripWhatsappPrefix(from: string): string {
 // Security: HMAC-SHA1 signature validation via X-Twilio-Signature header.
 export async function POST(req: NextRequest) {
   const authToken = process.env.TWILIO_AUTH_TOKEN
-  const appUrl    = process.env.NEXT_PUBLIC_APP_URL
 
-  if (!authToken || !appUrl) {
-    console.error('[webhooks/whatsapp] Missing TWILIO_AUTH_TOKEN or NEXT_PUBLIC_APP_URL')
+  if (!authToken) {
+    console.error('[webhooks/whatsapp] Missing TWILIO_AUTH_TOKEN')
     return new Response('Misconfigured', { status: 500 })
   }
 
   const signature  = req.headers.get('x-twilio-signature') ?? ''
-  const webhookUrl = `${appUrl}/api/webhooks/whatsapp`
+  const webhookUrl = buildWebhookUrl(req)
 
   let params: Record<string, string> = {}
   try {
@@ -37,7 +46,12 @@ export async function POST(req: NextRequest) {
 
   const isValid = validateRequest(authToken, signature, webhookUrl, params)
   if (!isValid) {
-    console.warn('[webhooks/whatsapp] Invalid Twilio signature — rejected')
+    console.error(
+      '[webhooks/whatsapp] Invalid Twilio signature — rejected\n' +
+      `  url_used:  ${webhookUrl}\n` +
+      `  signature: ${signature.slice(0, 12)}...\n` +
+      `  token_hint: ${authToken.slice(0, 4)}...`
+    )
     return new Response('Forbidden', { status: 403 })
   }
 
