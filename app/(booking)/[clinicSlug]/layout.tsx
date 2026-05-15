@@ -25,7 +25,16 @@ export default async function BookingLayout({
           <span className="font-semibold text-slate-900 text-sm">{clinicName}</span>
         </div>
       </header>
-      <main className="max-w-5xl mx-auto px-4 py-6 pb-16">{children}</main>
+      <main className="max-w-5xl mx-auto px-4 py-6 pb-10">{children}</main>
+      <footer className="border-t border-slate-100 bg-white/60 py-4">
+        <div className="max-w-5xl mx-auto px-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
+          <a href="/privacidad"   className="text-xs text-slate-400 hover:text-slate-600 transition-colors">Privacidad</a>
+          <a href="/aviso-legal"  className="text-xs text-slate-400 hover:text-slate-600 transition-colors">Aviso Legal</a>
+          <a href="/cookies"      className="text-xs text-slate-400 hover:text-slate-600 transition-colors">Cookies</a>
+          <span className="text-xs text-slate-300">·</span>
+          <span className="text-xs text-slate-400">Gestionado por GXA Studio</span>
+        </div>
+      </footer>
     </div>
   )
 }

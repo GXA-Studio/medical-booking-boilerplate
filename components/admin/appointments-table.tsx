@@ -63,12 +63,12 @@ export function AppointmentsTable({
   appointments: AppointmentRow[]
   timezone: string
 }) {
-  const router      = useRouter()
-  const pathname    = usePathname()
+  const router       = useRouter()
+  const pathname     = usePathname()
   const searchParams = useSearchParams()
 
-  const [cancelId, setCancelId]   = useState<string | null>(null)
-  const [pending,  start]         = useTransition()
+  const [cancelId, setCancelId] = useState<string | null>(null)
+  const [pending,  start]       = useTransition()
 
   const statusFilter = searchParams.get('status') ?? 'all'
   const dateFilter   = searchParams.get('date') ?? ''
@@ -102,13 +102,13 @@ export function AppointmentsTable({
 
   return (
     <>
-      {/* Stats strip */}
-      <div className="grid grid-cols-4 gap-3">
+      {/* Stats strip — 2 cols on mobile, 4 on sm+ */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {([
-          { label: 'Total',      value: stats.total,     color: 'text-slate-700' },
-          { label: 'Pendientes', value: stats.pending,   color: 'text-amber-600' },
-          { label: 'Confirmadas',value: stats.confirmed, color: 'text-emerald-600' },
-          { label: 'Canceladas', value: stats.cancelled, color: 'text-rose-600' },
+          { label: 'Total',       value: stats.total,     color: 'text-slate-700' },
+          { label: 'Pendientes',  value: stats.pending,   color: 'text-amber-600' },
+          { label: 'Confirmadas', value: stats.confirmed, color: 'text-emerald-600' },
+          { label: 'Canceladas',  value: stats.cancelled, color: 'text-rose-600' },
         ] as const).map((s) => (
           <Card key={s.label} className="border-slate-200/70">
             <CardContent className="p-4">
@@ -120,7 +120,7 @@ export function AppointmentsTable({
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3 flex-wrap">
+      <div className="flex flex-wrap gap-3">
         <Select value={statusFilter} onValueChange={(v) => updateFilter('status', v)}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Estado" />
@@ -145,7 +145,70 @@ export function AppointmentsTable({
         )}
       </div>
 
-      <Card className="border-slate-200/70">
+      {/* Mobile card view (< md) */}
+      <div className="md:hidden">
+        {initial.length === 0 ? (
+          <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
+            No hay citas para los filtros seleccionados.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {initial.map((a) => (
+              <Card key={a.id} className="border-slate-200/70">
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="font-medium text-sm truncate">{a.patient_name}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+                        <Phone className="h-3 w-3 shrink-0" />
+                        {a.patient_phone}
+                      </div>
+                    </div>
+                    <Badge variant={STATUS_VARIANTS[a.status]} className="shrink-0">
+                      {STATUS_LABELS[a.status]}
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-1.5 text-sm text-muted-foreground">
+                    <div className="flex items-center gap-1.5">
+                      <Stethoscope className="h-3.5 w-3.5 shrink-0" />
+                      <span>{a.doctors?.name ?? '—'}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <CalendarDays className="h-3.5 w-3.5 shrink-0" />
+                      <span>{formatDateTime(a.starts_at, timezone)}</span>
+                    </div>
+                    {a.services && (
+                      <Badge variant="outline" className="text-xs font-normal">
+                        {a.services.name} · {a.services.duration_minutes} min
+                      </Badge>
+                    )}
+                  </div>
+
+                  {a.status !== 'cancelled' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full border-rose-200 text-rose-500 hover:bg-rose-50 hover:text-rose-700"
+                      onClick={() => setCancelId(a.id)}
+                      disabled={pending}
+                    >
+                      <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                      Cancelar cita
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Desktop table view (>= md) */}
+      <Card className="hidden md:block border-slate-200/70">
         <CardContent className="p-0">
           <Table>
             <TableHeader>

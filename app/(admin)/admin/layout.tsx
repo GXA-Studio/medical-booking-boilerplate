@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Sidebar } from '@/components/admin/sidebar'
-import { Toaster } from '@/components/ui/toaster'
+import { AdminShell } from '@/components/admin/admin-shell'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -18,26 +17,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const clinicName = (profile?.clinics as { name: string } | null)?.name ?? 'Mi Clínica'
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
-      <Sidebar clinicName={clinicName} userEmail={user.email ?? ''} />
-
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Top bar */}
-        <header className="h-14 border-b border-slate-200 bg-white px-6 flex items-center justify-between shrink-0">
-          <div className="h-4 w-px bg-slate-200" />
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-emerald-500" />
-            <span className="text-xs text-slate-500">Conectado</span>
-          </div>
-        </header>
-
-        {/* Scrollable content area */}
-        <main className="flex-1 overflow-y-auto p-6">
-          {children}
-        </main>
-      </div>
-
-      <Toaster />
-    </div>
+    <AdminShell clinicName={clinicName} userEmail={user.email ?? ''}>
+      {children}
+    </AdminShell>
   )
 }

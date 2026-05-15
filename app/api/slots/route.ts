@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { slotsLimiter } from '@/lib/rate-limit'
 
 // GET /api/slots
 //
@@ -12,6 +13,15 @@ import { createClient } from '@/lib/supabase/server'
 //   → { slots: Array<{ start: string; doctors: Array<{ id, name, specialty }> }> }
 //
 // Both modes call SECURITY DEFINER RPCs via the anon client (H-02 compliant).
+
+function getClientIp(req: NextRequest): string {
+  return (
+    req.headers.get('x-forwarded-for')?.split(',')[0].trim() ??
+    req.headers.get('x-real-ip') ??
+    'unknown'
+  )
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const doctorId  = searchParams.get('doctorId')
@@ -34,6 +44,16 @@ export async function GET(req: NextRequest) {
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return NextResponse.json({ error: 'date must be YYYY-MM-DD' }, { status: 400 })
+  }
+
+  const ip = getClientIp(req)
+  try {
+    const { success: ratePassed } = await slotsLimiter.limit(ip)
+    if (!ratePassed) {
+      return NextResponse.json({ error: 'RATE_LIMITED' }, { status: 429 })
+    }
+  } catch {
+    // Fail open if Redis unavailable
   }
 
   const supabase = await createClient()

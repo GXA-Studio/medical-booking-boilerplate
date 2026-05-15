@@ -5,16 +5,15 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import {
-  LayoutDashboard, CalendarDays, UserRound, Layers, Clock,
+  CalendarDays, UserRound, Layers, Clock,
   LogOut, Stethoscope, ChevronRight,
 } from 'lucide-react'
 
 const navItems = [
-  { href: '/admin',              label: 'Dashboard',   icon: LayoutDashboard, exact: true },
-  { href: '/admin/appointments', label: 'Citas',       icon: CalendarDays },
-  { href: '/admin/services',     label: 'Servicios',   icon: Layers },
-  { href: '/admin/doctors',      label: 'Médicos',     icon: UserRound },
-  { href: '/admin/schedules',    label: 'Horarios',    icon: Clock },
+  { href: '/admin/appointments', label: 'Citas',     icon: CalendarDays },
+  { href: '/admin/services',     label: 'Servicios', icon: Layers },
+  { href: '/admin/doctors',      label: 'Médicos',   icon: UserRound },
+  { href: '/admin/schedules',    label: 'Horarios',  icon: Clock },
 ]
 
 interface SidebarProps {
@@ -49,9 +48,7 @@ export function Sidebar({ clinicName = 'Mi Clínica', userEmail = '' }: SidebarP
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
         {navItems.map((item) => {
-          const active = item.exact
-            ? pathname === item.href
-            : pathname.startsWith(item.href)
+          const active = pathname.startsWith(item.href)
 
           return (
             <Link

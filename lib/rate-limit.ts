@@ -37,3 +37,11 @@ export const bookingIpLimiter = new Ratelimit({
   analytics: true,
   prefix: '@mbb/booking:ip',
 })
+
+// S-01 PATCH: 60 slot lookups per IP per minute — prevents enumeration/scraping
+export const slotsLimiter = new Ratelimit({
+  redis: getRedis(),
+  limiter: Ratelimit.slidingWindow(60, '1 m'),
+  analytics: true,
+  prefix: '@mbb/slots:ip',
+})

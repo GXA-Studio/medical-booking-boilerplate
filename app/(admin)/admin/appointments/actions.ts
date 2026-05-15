@@ -2,6 +2,8 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 async function getClinicId(supabase: Awaited<ReturnType<typeof createClient>>) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Unauthorized')
@@ -11,6 +13,8 @@ async function getClinicId(supabase: Awaited<ReturnType<typeof createClient>>) {
 }
 
 export async function cancelAppointment(id: string) {
+  if (!UUID_RE.test(id)) return { error: 'Invalid appointment ID format' }
+
   const supabase = await createClient()
   const clinicId = await getClinicId(supabase)
 

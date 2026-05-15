@@ -3,7 +3,11 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { sendCancellationWhatsApp, sendRescheduleWhatsApp } from '@/lib/twilio/client'
 import { getBaseUrl } from '@/lib/utils'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export async function cancelByToken(token: string): Promise<{ success: boolean; error?: string }> {
+  if (!UUID_RE.test(token)) return { success: false, error: 'Token inválido.' }
+
   const supabase = createServiceClient()
 
   const { data, error } = await supabase
@@ -41,6 +45,10 @@ export async function rescheduleAppointment(
   newDoctorId: string,
   newStartsAt: string,
 ): Promise<{ success: boolean; newStartsAt?: string; error?: string }> {
+  if (!UUID_RE.test(token) || !UUID_RE.test(newDoctorId)) {
+    return { success: false, error: 'Parámetros inválidos.' }
+  }
+
   const supabase = createServiceClient()
 
   const { data, error } = await supabase.rpc('reschedule_appointment', {
