@@ -77,7 +77,7 @@ export function AppointmentsTable({
     const params = new URLSearchParams(searchParams.toString())
     if (value && value !== 'all') params.set(key, value)
     else params.delete(key)
-    router.push(`${pathname}?${params.toString()}`)
+    router.push(`${pathname}?${params.toString()}`, { scroll: false })
   }
 
   function handleCancel() {
@@ -139,7 +139,7 @@ export function AppointmentsTable({
           onChange={(e) => updateFilter('date', e.target.value)}
         />
         {(statusFilter !== 'all' || dateFilter) && (
-          <Button variant="ghost" size="sm" onClick={() => router.push(pathname)}>
+          <Button variant="ghost" size="sm" onClick={() => router.push(pathname, { scroll: false })}>
             Limpiar filtros
           </Button>
         )}
