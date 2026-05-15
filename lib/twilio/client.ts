@@ -1,18 +1,14 @@
-import 'server-only'  // H-01 FIX: prevents accidental bundling of Twilio credentials in client
+import 'server-only'
 import twilio from 'twilio'
 import { formatSmsDateTime } from '@/lib/utils'
 
-// Lazy singleton — throws at call-time (not import-time) if env vars are missing,
-// so the build doesn't fail when env is incomplete.
 let _client: ReturnType<typeof twilio> | null = null
 
 function getClient() {
   if (!_client) {
-    const sid = process.env.TWILIO_ACCOUNT_SID
+    const sid   = process.env.TWILIO_ACCOUNT_SID
     const token = process.env.TWILIO_AUTH_TOKEN
-    if (!sid || !token) {
-      throw new Error('TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN must be set')
-    }
+    if (!sid || !token) throw new Error('TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN must be set')
     _client = twilio(sid, token)
   }
   return _client
@@ -24,9 +20,14 @@ const FROM = () => {
   return n
 }
 
+// WhatsApp Sandbox sender — replace with approved number in production
+const WHATSAPP_FROM = process.env.TWILIO_WHATSAPP_FROM ?? 'whatsapp:+14155238886'
+
+// ─── SMS (legacy OTP flow, kept for backward compatibility) ───────────────────
+
 export interface SendOtpParams {
-  to: string       // E.164 phone number
-  otp: string      // Plaintext 6-digit code
+  to: string
+  otp: string
   clinicName: string
 }
 
@@ -42,20 +43,14 @@ export interface SendConfirmationParams {
   to: string
   patientName: string
   clinicName: string
-  startsAt: string   // UTC ISO string
-  timezone: string   // IANA timezone of the clinic
+  startsAt: string
+  timezone: string
   doctorName: string
   serviceName: string
 }
 
 export async function sendConfirmationSms({
-  to,
-  patientName,
-  clinicName,
-  startsAt,
-  timezone,
-  doctorName,
-  serviceName,
+  to, patientName, clinicName, startsAt, timezone, doctorName, serviceName,
 }: SendConfirmationParams): Promise<void> {
   const dateStr = formatSmsDateTime(startsAt, timezone)
   await getClient().messages.create({
@@ -65,5 +60,58 @@ export async function sendConfirmationSms({
       `✅ ${clinicName}: cita confirmada para ${patientName}.\n` +
       `📅 ${dateStr}\n` +
       `👨‍⚕️ ${doctorName} — ${serviceName}`,
+  })
+}
+
+// ─── WhatsApp (instant booking flow) ─────────────────────────────────────────
+
+export interface SendWhatsAppConfirmationParams {
+  to: string                // E.164, e.g. "+34612345678"
+  patientName: string
+  clinicName: string
+  doctorName: string
+  startsAt: string          // UTC ISO
+  timezone: string
+  cancellationToken: string
+  baseUrl: string
+}
+
+export async function sendWhatsAppConfirmation({
+  to, patientName, clinicName, doctorName, startsAt, timezone, cancellationToken, baseUrl,
+}: SendWhatsAppConfirmationParams): Promise<void> {
+  const dateStr = formatSmsDateTime(startsAt, timezone)
+  await getClient().messages.create({
+    to:   `whatsapp:${to}`,
+    from: WHATSAPP_FROM,
+    body:
+      `¡Hola ${patientName}! Cita confirmada en ${clinicName}.\n` +
+      `Especialista: ${doctorName}. Fecha: ${dateStr}.\n\n` +
+      `🔗 Cancelar con un clic: ${baseUrl}/cancel/${cancellationToken}\n\n` +
+      `Nota legal (AEPD): Tratamos tus datos según el RGPD. +info en nuestra web o responde a este chat.`,
+  })
+}
+
+export interface SendWhatsAppReminderParams {
+  to: string
+  patientName: string
+  clinicName: string
+  doctorName: string
+  startsAt: string
+  timezone: string
+  cancellationToken: string
+  baseUrl: string
+}
+
+export async function sendWhatsAppReminder({
+  to, patientName, clinicName, doctorName, startsAt, timezone, cancellationToken, baseUrl,
+}: SendWhatsAppReminderParams): Promise<void> {
+  const dateStr = formatSmsDateTime(startsAt, timezone)
+  await getClient().messages.create({
+    to:   `whatsapp:${to}`,
+    from: WHATSAPP_FROM,
+    body:
+      `⏰ Recordatorio: ${patientName}, mañana tienes cita en ${clinicName}.\n` +
+      `Especialista: ${doctorName}. Fecha: ${dateStr}.\n\n` +
+      `¿No puedes venir? Cancela aquí: ${baseUrl}/cancel/${cancellationToken}`,
   })
 }

@@ -56,7 +56,7 @@ export function StepConfirmed({ service, doctor, slotStart, timezone, patientNam
       >
         <h2 className="text-2xl font-bold text-slate-900">¡Cita confirmada!</h2>
         <p className="text-slate-500 text-sm">
-          {patientName}, tu cita ha sido reservada. Recibirás un SMS de confirmación.
+          {patientName}, tu cita ha sido reservada. Recibirás un WhatsApp con los detalles y el enlace de cancelación.
         </p>
       </motion.div>
 

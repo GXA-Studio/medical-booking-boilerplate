@@ -29,3 +29,11 @@ export const otpVerifyLimiter = new Ratelimit({
   analytics: true,
   prefix: '@mbb/otp:verify',
 })
+
+// Anti-spam: max 10 instant bookings per IP per hour
+export const bookingIpLimiter = new Ratelimit({
+  redis: getRedis(),
+  limiter: Ratelimit.slidingWindow(10, '1 h'),
+  analytics: true,
+  prefix: '@mbb/booking:ip',
+})

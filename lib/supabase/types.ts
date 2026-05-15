@@ -19,6 +19,7 @@ export type Database = {
     Tables: {
       appointments: {
         Row: {
+          cancellation_token: string
           clinic_id: string
           created_at: string
           doctor_id: string
@@ -29,11 +30,13 @@ export type Database = {
           otp_expires_at: string | null
           patient_name: string
           patient_phone: string
+          reminder_sent: boolean
           service_id: string
           starts_at: string
           status: Database["public"]["Enums"]["appointment_status"]
         }
         Insert: {
+          cancellation_token?: string
           clinic_id: string
           created_at?: string
           doctor_id: string
@@ -44,11 +47,13 @@ export type Database = {
           otp_expires_at?: string | null
           patient_name: string
           patient_phone: string
+          reminder_sent?: boolean
           service_id: string
           starts_at: string
           status?: Database["public"]["Enums"]["appointment_status"]
         }
         Update: {
+          cancellation_token?: string
           clinic_id?: string
           created_at?: string
           doctor_id?: string
@@ -59,6 +64,7 @@ export type Database = {
           otp_expires_at?: string | null
           patient_name?: string
           patient_phone?: string
+          reminder_sent?: boolean
           service_id?: string
           starts_at?: string
           status?: Database["public"]["Enums"]["appointment_status"]
@@ -372,6 +378,7 @@ export type Database = {
           p_starts_at: string
         }
         Returns: {
+          cancellation_token: string
           clinic_id: string
           created_at: string
           doctor_id: string
@@ -382,6 +389,40 @@ export type Database = {
           otp_expires_at: string | null
           patient_name: string
           patient_phone: string
+          reminder_sent: boolean
+          service_id: string
+          starts_at: string
+          status: Database["public"]["Enums"]["appointment_status"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "appointments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      book_slot_confirmed: {
+        Args: {
+          p_clinic_id: string
+          p_doctor_id: string
+          p_patient_name: string
+          p_patient_phone: string
+          p_service_id: string
+          p_starts_at: string
+        }
+        Returns: {
+          cancellation_token: string
+          clinic_id: string
+          created_at: string
+          doctor_id: string
+          ends_at: string
+          id: string
+          notes: string | null
+          otp_code_hash: string | null
+          otp_expires_at: string | null
+          patient_name: string
+          patient_phone: string
+          reminder_sent: boolean
           service_id: string
           starts_at: string
           status: Database["public"]["Enums"]["appointment_status"]
@@ -396,6 +437,7 @@ export type Database = {
       confirm_appointment: {
         Args: { p_appointment_id: string; p_otp_code_hash: string }
         Returns: {
+          cancellation_token: string
           clinic_id: string
           created_at: string
           doctor_id: string
@@ -406,6 +448,7 @@ export type Database = {
           otp_expires_at: string | null
           patient_name: string
           patient_phone: string
+          reminder_sent: boolean
           service_id: string
           starts_at: string
           status: Database["public"]["Enums"]["appointment_status"]

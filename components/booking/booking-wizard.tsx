@@ -5,15 +5,14 @@ import { StepService }   from './step-service'
 import { StepSlot }      from './step-slot'
 import { StepDoctor }    from './step-doctor'
 import { StepPatient }   from './step-patient'
-import { StepOtp }       from './step-otp'
 import { StepConfirmed } from './step-confirmed'
 import type { ClinicBookingData, ServiceOption, DoctorOption, SlotWithDoctors, BookingState } from './types'
 
-// New Time-First flow: Service → Slot (calendar) → Doctor (if >1) → Patient → OTP → Confirmed
-const STEPS = { SERVICE: 0, SLOT: 1, DOCTOR: 2, PATIENT: 3, OTP: 4, CONFIRMED: 5 }
+// Time-First flow: Service → Slot (calendar) → Doctor (if >1) → Patient → Confirmed
+const STEPS = { SERVICE: 0, SLOT: 1, DOCTOR: 2, PATIENT: 3, CONFIRMED: 4 }
 
-const TOTAL_STEPS  = 5
-const STEP_LABELS  = ['Servicio', 'Fecha', 'Médico', 'Datos', 'Código']
+const TOTAL_STEPS = 4
+const STEP_LABELS = ['Servicio', 'Fecha', 'Médico', 'Datos']
 
 function ProgressBar({ current }: { current: number }) {
   const scaleX = current / TOTAL_STEPS
@@ -38,7 +37,6 @@ function ProgressBar({ current }: { current: number }) {
         <span className="text-[11px] text-slate-400 tabular-nums">{current + 1}/{TOTAL_STEPS}</span>
       </div>
       <div className="h-1 w-full rounded-full bg-slate-100 overflow-hidden">
-        {/* scaleX + origin-left avoids layout reflow (width animation triggers reflow) */}
         <motion.div
           className="h-full w-full rounded-full bg-primary origin-left"
           initial={false}
@@ -62,7 +60,6 @@ export function BookingWizard({ clinic }: { clinic: ClinicBookingData }) {
     appointmentId: null,
   })
 
-  const [otpError,     setOtpError]     = useState<string | null>(null)
   const [patientError, setPatientError] = useState<string | null>(null)
   const [isLoading,    setIsLoading]    = useState(false)
 
@@ -74,7 +71,6 @@ export function BookingWizard({ clinic }: { clinic: ClinicBookingData }) {
 
   const selectSlot = useCallback((slot: SlotWithDoctors) => {
     if (slot.doctors.length === 1) {
-      // Auto-assign single doctor and skip DOCTOR step
       setState((s) => ({
         ...s,
         step:        STEPS.PATIENT,
@@ -99,7 +95,6 @@ export function BookingWizard({ clinic }: { clinic: ClinicBookingData }) {
 
   const goBack = useCallback(() => {
     setState((s) => {
-      // If PATIENT was reached by auto-skipping DOCTOR (1 doctor), go back to SLOT
       if (s.step === STEPS.PATIENT && s.slotDoctors.length <= 1) {
         return { ...s, step: STEPS.SLOT }
       }
@@ -107,11 +102,11 @@ export function BookingWizard({ clinic }: { clinic: ClinicBookingData }) {
     })
   }, [])
 
-  async function sendOtp(name: string, phone: string) {
+  async function bookInstant(name: string, phone: string) {
     setIsLoading(true)
     setPatientError(null)
     try {
-      const res = await fetch('/api/otp/send', {
+      const res = await fetch('/api/book', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
@@ -134,12 +129,12 @@ export function BookingWizard({ clinic }: { clinic: ClinicBookingData }) {
           setPatientError('Demasiados intentos. Espera unos minutos e inténtalo de nuevo.')
           return
         }
-        setPatientError(body.error ?? 'No se pudo enviar el SMS. Inténtalo de nuevo.')
+        setPatientError(body.error ?? 'No se pudo confirmar la cita. Inténtalo de nuevo.')
         return
       }
       setState((s) => ({
         ...s,
-        step:          STEPS.OTP,
+        step:          STEPS.CONFIRMED,
         patientName:   name,
         patientPhone:  phone,
         appointmentId: body.appointmentId,
@@ -149,43 +144,6 @@ export function BookingWizard({ clinic }: { clinic: ClinicBookingData }) {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  async function verifyOtp(code: string) {
-    if (!state.appointmentId) return
-    setIsLoading(true)
-    setOtpError(null)
-    try {
-      const res = await fetch('/api/otp/verify', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ appointmentId: state.appointmentId, otpCode: code }),
-      })
-      const body = await res.json()
-      if (!res.ok) {
-        if (res.status === 401) {
-          setOtpError('Código incorrecto. Revísalo e inténtalo de nuevo.')
-          return
-        }
-        if (res.status === 429) {
-          setOtpError('Demasiados intentos. La cita ha sido cancelada por seguridad.')
-          setState((s) => ({ ...s, step: STEPS.SERVICE }))
-          return
-        }
-        setOtpError(body.error ?? 'Error al verificar. Inténtalo de nuevo.')
-        return
-      }
-      setState((s) => ({ ...s, step: STEPS.CONFIRMED }))
-    } catch {
-      setOtpError('Error de red. Revisa tu conexión e inténtalo de nuevo.')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  async function resendOtp() {
-    if (!state.patientName || !state.patientPhone) return
-    await sendOtp(state.patientName, state.patientPhone)
   }
 
   // ─── Render ───────────────────────────────────────────────────
@@ -234,21 +192,10 @@ export function BookingWizard({ clinic }: { clinic: ClinicBookingData }) {
             doctor={state.doctor}
             timezone={clinic.timezone}
             slotStart={state.slotStart}
-            onSubmit={sendOtp}
+            onSubmit={bookInstant}
             onBack={goBack}
             isLoading={isLoading}
             error={patientError}
-          />
-        )}
-
-        {state.step === STEPS.OTP && (
-          <StepOtp
-            key="otp"
-            patientPhone={state.patientPhone}
-            onVerify={verifyOtp}
-            onResend={resendOtp}
-            isLoading={isLoading}
-            error={otpError}
           />
         )}
 

@@ -65,7 +65,7 @@ export function StepPatient({
         </Button>
         <div>
           <h2 className="text-xl font-bold text-slate-900">Tus datos</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Para confirmar la cita te enviaremos un SMS.</p>
+          <p className="text-sm text-slate-500 mt-0.5">Recibirás la confirmación por WhatsApp al instante.</p>
         </div>
       </div>
 
@@ -152,9 +152,9 @@ export function StepPatient({
 
         <Button type="submit" className="w-full" size="lg" disabled={!canSubmit}>
           {isLoading ? (
-            <><Loader2 className="h-4 w-4 animate-spin mr-2" />Enviando SMS…</>
+            <><Loader2 className="h-4 w-4 animate-spin mr-2" />Reservando…</>
           ) : (
-            'Recibir código por SMS'
+            'Confirmar cita'
           )}
         </Button>
       </form>

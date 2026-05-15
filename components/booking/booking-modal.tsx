@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { StepPatient }   from './step-patient'
-import { StepOtp }       from './step-otp'
 import { StepConfirmed } from './step-confirmed'
 import type { ServiceOption, DoctorOption, ModalPhase } from './types'
 
@@ -20,22 +19,16 @@ interface Props {
 export function BookingModal({
   open, onOpenChange, clinicId, timezone, service, doctor, slotStart,
 }: Props) {
-  const [phase,         setPhase]         = useState<ModalPhase>('patient')
-  const [patientName,   setPatientName]   = useState('')
-  const [patientPhone,  setPatientPhone]  = useState('')
-  const [appointmentId, setAppointmentId] = useState<string | null>(null)
-  const [isLoading,     setIsLoading]     = useState(false)
-  const [patientError,  setPatientError]  = useState<string | null>(null)
-  const [otpError,      setOtpError]      = useState<string | null>(null)
+  const [phase,        setPhase]        = useState<ModalPhase>('patient')
+  const [patientName,  setPatientName]  = useState('')
+  const [isLoading,    setIsLoading]    = useState(false)
+  const [patientError, setPatientError] = useState<string | null>(null)
 
   function resetState() {
     setPhase('patient')
     setPatientName('')
-    setPatientPhone('')
-    setAppointmentId(null)
     setIsLoading(false)
     setPatientError(null)
-    setOtpError(null)
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -43,11 +36,11 @@ export function BookingModal({
     onOpenChange(nextOpen)
   }
 
-  async function sendOtp(name: string, phone: string) {
+  async function bookInstant(name: string, phone: string) {
     setIsLoading(true)
     setPatientError(null)
     try {
-      const res = await fetch('/api/otp/send', {
+      const res = await fetch('/api/book', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
@@ -70,54 +63,16 @@ export function BookingModal({
           setPatientError('Demasiados intentos. Espera unos minutos.')
           return
         }
-        setPatientError(body.error ?? 'No se pudo enviar el SMS. Inténtalo de nuevo.')
+        setPatientError(body.error ?? 'No se pudo confirmar la cita. Inténtalo de nuevo.')
         return
       }
       setPatientName(name)
-      setPatientPhone(phone)
-      setAppointmentId(body.appointmentId)
-      setPhase('otp')
+      setPhase('confirmed')
     } catch {
       setPatientError('Error de red. Revisa tu conexión.')
     } finally {
       setIsLoading(false)
     }
-  }
-
-  async function verifyOtp(code: string) {
-    if (!appointmentId) return
-    setIsLoading(true)
-    setOtpError(null)
-    try {
-      const res = await fetch('/api/otp/verify', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ appointmentId, otpCode: code }),
-      })
-      const body = await res.json()
-      if (!res.ok) {
-        if (res.status === 401) {
-          setOtpError('Código incorrecto. Revísalo e inténtalo de nuevo.')
-          return
-        }
-        if (res.status === 429) {
-          setOtpError('Demasiados intentos. La cita ha sido cancelada por seguridad.')
-          handleOpenChange(false)
-          return
-        }
-        setOtpError(body.error ?? 'Error al verificar.')
-        return
-      }
-      setPhase('confirmed')
-    } catch {
-      setOtpError('Error de red. Revisa tu conexión.')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  async function resendOtp() {
-    if (patientName && patientPhone) await sendOtp(patientName, patientPhone)
   }
 
   return (
@@ -131,20 +86,10 @@ export function BookingModal({
               doctor={doctor}
               timezone={timezone}
               slotStart={slotStart}
-              onSubmit={sendOtp}
+              onSubmit={bookInstant}
               onBack={() => handleOpenChange(false)}
               isLoading={isLoading}
               error={patientError}
-            />
-          )}
-          {phase === 'otp' && (
-            <StepOtp
-              key="otp"
-              patientPhone={patientPhone}
-              onVerify={verifyOtp}
-              onResend={resendOtp}
-              isLoading={isLoading}
-              error={otpError}
             />
           )}
           {phase === 'confirmed' && (

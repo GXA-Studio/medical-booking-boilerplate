@@ -66,7 +66,7 @@ export interface SearchFilters {
 // slots[doctorId][fecha_YYYY-MM-DD] = ISO UTC starts[]
 export type WeekSlotsMap = Record<string, Record<string, string[]>>
 
-export type ModalPhase = 'patient' | 'otp' | 'confirmed'
+export type ModalPhase = 'patient' | 'confirmed'
 
 export interface ModalBookingState {
   open:          boolean
