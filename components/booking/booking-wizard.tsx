@@ -220,7 +220,7 @@ export function BookingWizard({ clinic }: { clinic: ClinicBookingData }) {
           <StepDoctorPre
             key="doctor-pre"
             service={state.service}
-            doctors={state.service.doctors}
+            doctors={clinic.services.find((s) => s.id === state.service!.id)?.doctors ?? []}
             onSelect={selectDoctorPre}
             onBack={goBack}
           />

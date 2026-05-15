@@ -7,6 +7,17 @@ import { getBaseUrl, isValidE164, sanitizeName } from '@/lib/utils'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/**
+ * Normalize phone input so staff don't need to type E.164 manually.
+ * - Strips spaces, dashes, dots, parentheses
+ * - If result is 9 digits starting with 6 or 7 (Spanish mobile), prepends +34
+ */
+function sanitizePhone(raw: string): string {
+  const stripped = raw.trim().replace(/[\s\-().]/g, '')
+  if (/^[67]\d{8}$/.test(stripped)) return `+34${stripped}`
+  return stripped
+}
+
 async function getClinicId(supabase: Awaited<ReturnType<typeof createClient>>) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Unauthorized')
@@ -45,10 +56,12 @@ export interface BookManualFormData {
 export async function bookAppointmentManual(data: BookManualFormData) {
   const { patientName, patientPhone, doctorId, serviceId, startsAt } = data
 
-  const name = sanitizeName(patientName)
-  if (name.length < 2) return { error: 'El nombre del paciente debe tener al menos 2 caracteres.' }
-  if (!isValidE164(patientPhone)) return { error: 'El teléfono debe estar en formato E.164 (p. ej. +34612345678).' }
-  if (!UUID_RE.test(doctorId)) return { error: 'Médico no válido.' }
+  const name  = sanitizeName(patientName)
+  const phone = sanitizePhone(patientPhone)
+
+  if (name.length < 2)    return { error: 'El nombre del paciente debe tener al menos 2 caracteres.' }
+  if (!isValidE164(phone)) return { error: 'Teléfono no válido. Introduce un número como 612345678 o +34612345678.' }
+  if (!UUID_RE.test(doctorId))  return { error: 'Médico no válido.' }
   if (!UUID_RE.test(serviceId)) return { error: 'Servicio no válido.' }
   if (new Date(startsAt) < new Date()) return { error: 'La fecha y hora deben ser en el futuro.' }
 
@@ -68,7 +81,7 @@ export async function bookAppointmentManual(data: BookManualFormData) {
     p_doctor_id:     doctorId,
     p_service_id:    serviceId,
     p_patient_name:  name,
-    p_patient_phone: patientPhone,
+    p_patient_phone: phone,
     p_starts_at:     startsAt,
   })
 
@@ -98,7 +111,7 @@ export async function bookAppointmentManual(data: BookManualFormData) {
   // The booking is already committed to the DB at this point, so the notification is safe to run async.
   after(() => {
     void sendWhatsAppConfirmation({
-      to:                patientPhone,
+      to:                phone,
       patientName:       name,
       clinicName:        (clinic as { name: string }).name,
       doctorName:        doctor?.name ?? 'tu médico',
@@ -107,7 +120,13 @@ export async function bookAppointmentManual(data: BookManualFormData) {
       cancellationToken: appt.cancellation_token,
       baseUrl,
     }).catch((err) => {
-      console.error('[bookAppointmentManual] WhatsApp confirmation failed (booking still saved):', err)
+      console.error(
+        '\n🚨 Twilio Admin Booking Error 🚨',
+        '\n  to:', phone,
+        '\n  patient:', name,
+        '\n  booking:', appt.id,
+        '\n  error:', err,
+      )
     })
   })
 
