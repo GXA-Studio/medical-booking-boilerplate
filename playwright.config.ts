@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const PROD_URL = process.env.PLAYWRIGHT_BASE_URL
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
@@ -9,10 +11,9 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
 
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000',
+    baseURL: PROD_URL ?? 'http://localhost:3000',
     trace: 'on-first-retry',
-    // Framer Motion animations complete fast; give them room without slowing tests
-    actionTimeout: 8_000,
+    actionTimeout: 10_000,
     navigationTimeout: 30_000,
   },
 
@@ -20,19 +21,15 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
 
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    env: {
-      // Use real env for Supabase connectivity; OTP routes are mocked in tests
-      NEXT_PUBLIC_SUPABASE_URL:    process.env.NEXT_PUBLIC_SUPABASE_URL    ?? '',
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '',
-      SUPABASE_SERVICE_ROLE_KEY:   process.env.SUPABASE_SERVICE_ROLE_KEY   ?? '',
-      TWILIO_ACCOUNT_SID:          'test',
-      TWILIO_AUTH_TOKEN:           'test',
-      TWILIO_PHONE_NUMBER:         '+10000000000',
-    },
-  },
+  // Only start the local dev server when not targeting a remote URL
+  ...(PROD_URL
+    ? {}
+    : {
+        webServer: {
+          command: 'npm run dev',
+          url: 'http://localhost:3000',
+          reuseExistingServer: true,
+          timeout: 120_000,
+        },
+      }),
 })

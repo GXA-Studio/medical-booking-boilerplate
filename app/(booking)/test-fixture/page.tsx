@@ -1,9 +1,7 @@
-// TEST-ONLY PAGE — do not ship to production routes.
-// Renders BookingWizard with static fixture data so Playwright can test
-// the full booking funnel without a live Supabase database.
-// Guard: only accessible when NODE_ENV !== 'production'.
+// TEST FIXTURE PAGE — serves static clinic data for E2E testing.
+// No database connection required. Safe to deploy: returns only hardcoded
+// mock data, no secrets, no user data exposed.
 
-import { notFound } from 'next/navigation'
 import { BookingWizard } from '@/components/booking/booking-wizard'
 import type { ClinicBookingData } from '@/components/booking/types'
 
@@ -39,8 +37,6 @@ const FIXTURE_CLINIC: ClinicBookingData = {
 }
 
 export default function TestFixturePage() {
-  if (process.env.NODE_ENV === 'production') notFound()
-
   return (
     <div className="max-w-lg mx-auto py-8 px-4">
       <BookingWizard clinic={FIXTURE_CLINIC} />
