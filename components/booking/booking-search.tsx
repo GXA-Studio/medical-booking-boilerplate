@@ -1,11 +1,13 @@
 'use client'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Loader2, SearchX, CheckCircle2 } from 'lucide-react'
-import { Button }          from '@/components/ui/button'
-import { SearchBar }       from './search-bar'
-import { DoctorResultCard } from './doctor-result-card'
-import { BookingModal }    from './booking-modal'
+import { Loader2, SearchX, CheckCircle2, CalendarDays } from 'lucide-react'
+import { Button }               from '@/components/ui/button'
+import { SearchBar }            from './search-bar'
+import { DoctorResultCard }     from './doctor-result-card'
+import { WeeklyGrid }           from './weekly-grid'
+import { BookingModal }         from './booking-modal'
+import { DoctorSelectionModal } from './doctor-selection-modal'
 import type {
   ClinicBookingData,
   DoctorOption,
@@ -16,6 +18,15 @@ import type {
 
 function todayString(): string {
   return new Date().toISOString().slice(0, 10)
+}
+
+function formatTime(iso: string, timezone: string): string {
+  return new Date(iso).toLocaleTimeString('es-ES', {
+    timeZone: timezone,
+    hour:     '2-digit',
+    minute:   '2-digit',
+    hour12:   false,
+  })
 }
 
 // ─── Success screen ───────────────────────────────────────────────────────────
@@ -30,7 +41,6 @@ function SuccessScreen({ patientName, onReset }: { patientName: string; onReset:
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col items-center text-center gap-6 py-14"
     >
-      {/* Animated check */}
       <motion.div
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
@@ -100,8 +110,13 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
     appointmentId: null,
   })
 
-  // Post-booking success state
-  const [isConfirmed,     setIsConfirmed]     = useState(false)
+  const [doctorSelectionModal, setDoctorSelectionModal] = useState<{
+    open:      boolean
+    slotStart: string | null
+    doctors:   DoctorOption[]
+  }>({ open: false, slotStart: null, doctors: [] })
+
+  const [isConfirmed,      setIsConfirmed]      = useState(false)
   const [confirmedPatient, setConfirmedPatient] = useState('')
 
   useEffect(() => {
@@ -142,6 +157,9 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
     [services, filters.serviceId]
   )
 
+  // Doctors list filtered by insurance (and by specific doctor if selected).
+  // Used both for the per-doctor card view and to look up which doctors
+  // have a given aggregated slot.
   const doctorsToDisplay = useMemo(() => {
     if (!selectedService) return []
     let docs = selectedService.doctors
@@ -160,6 +178,27 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
     })
   }, [selectedService, filters.doctorId, filters.insuranceId, doctorIns, weekSlots])
 
+  // ─── FASE 1: Aggregated slots (union of all insurance-filtered doctors) ───
+  const aggregatedSlots = useMemo((): Record<string, string[]> => {
+    if (filters.doctorId !== null) return {}
+    const byDate: Record<string, Set<string>> = {}
+    for (const doc of doctorsToDisplay) {
+      const docSlots = weekSlots[doc.id] ?? {}
+      for (const [date, isos] of Object.entries(docSlots)) {
+        if (!byDate[date]) byDate[date] = new Set()
+        for (const iso of isos) byDate[date].add(iso)
+      }
+    }
+    const result: Record<string, string[]> = {}
+    for (const [date, set] of Object.entries(byDate)) {
+      result[date] = [...set].sort()
+    }
+    return result
+  }, [weekSlots, doctorsToDisplay, filters.doctorId])
+
+  // ─── Slot click handlers ──────────────────────────────────────────────────
+
+  // Single-doctor mode: slot click from a DoctorResultCard
   function handleSlotClick(slotStart: string, doctor: DoctorOption) {
     if (!selectedService) return
     setModal({
@@ -168,6 +207,48 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
       service:       selectedService,
       doctor,
       slotStart,
+      patientName:   '',
+      patientPhone:  '',
+      appointmentId: null,
+    })
+  }
+
+  // ─── FASE 3: Aggregated mode slot click ──────────────────────────────────
+  function handleAggregatedSlotClick(slotStart: string) {
+    if (!selectedService) return
+
+    // Find which displayed doctors actually have this exact slot
+    const available = doctorsToDisplay.filter((doc) =>
+      Object.values(weekSlots[doc.id] ?? {}).flat().includes(slotStart)
+    )
+    if (available.length === 0) return
+
+    if (available.length === 1) {
+      // Only one doctor free — skip selection modal, go straight to booking
+      setModal({
+        open:          true,
+        phase:         'patient',
+        service:       selectedService,
+        doctor:        available[0],
+        slotStart,
+        patientName:   '',
+        patientPhone:  '',
+        appointmentId: null,
+      })
+    } else {
+      setDoctorSelectionModal({ open: true, slotStart, doctors: available })
+    }
+  }
+
+  function handleDoctorSelected(doctor: DoctorOption) {
+    if (!selectedService || !doctorSelectionModal.slotStart) return
+    setDoctorSelectionModal({ open: false, slotStart: null, doctors: [] })
+    setModal({
+      open:          true,
+      phase:         'patient',
+      service:       selectedService,
+      doctor,
+      slotStart:     doctorSelectionModal.slotStart,
       patientName:   '',
       patientPhone:  '',
       appointmentId: null,
@@ -216,38 +297,99 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
               <span className="text-sm">Buscando disponibilidad…</span>
             </div>
           ) : (
-            <div className="space-y-4">
-              {doctorsToDisplay.length === 0 ? (
+            // ─── FASE 2: Bifurcación del renderizado ─────────────────────────
+            filters.doctorId === null ? (
+              // ── Aggregated calendar (Cualquier profesional) ──────────────
+              doctorsToDisplay.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white p-12 text-center">
                   <SearchX className="h-8 w-8 text-slate-300" />
                   <div>
                     <p className="text-sm font-medium text-slate-600">
-                      No hay médicos disponibles con estos filtros
+                      No hay profesionales disponibles con estos filtros
                     </p>
                     <p className="text-xs text-slate-400 mt-1">
-                      Prueba a cambiar la mutua, el profesional o la fecha
+                      Prueba a cambiar la mutua o la fecha
                     </p>
                   </div>
                 </div>
               ) : (
-                doctorsToDisplay.map((doctor) => (
-                  <DoctorResultCard
-                    key={doctor.id}
-                    doctor={doctor}
-                    service={selectedService!}
-                    insuranceIds={doctorIns[doctor.id] ?? []}
-                    allInsurances={insurances}
-                    slots={weekSlots[doctor.id] ?? {}}
-                    dates={dates}
-                    timezone={clinic.timezone}
-                    timeOfDay={filters.timeOfDay}
-                    onSlotClick={handleSlotClick}
-                  />
-                ))
-              )}
-            </div>
+                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  <div className="flex items-start gap-3 p-5 pb-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 shrink-0">
+                      <CalendarDays className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-base leading-tight">
+                        Horarios disponibles en la clínica
+                      </h3>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        Elige una hora. Si hay varios profesionales disponibles podrás escoger al que prefieras.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-100 mx-5" />
+
+                  <div className="p-4 pt-3">
+                    <WeeklyGrid
+                      slots={aggregatedSlots}
+                      dates={dates}
+                      timezone={clinic.timezone}
+                      timeOfDay={filters.timeOfDay}
+                      onSlotClick={handleAggregatedSlotClick}
+                    />
+                  </div>
+                </div>
+              )
+            ) : (
+              // ── Per-doctor cards (specific doctor selected) ──────────────
+              <div className="space-y-4">
+                {doctorsToDisplay.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white p-12 text-center">
+                    <SearchX className="h-8 w-8 text-slate-300" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-600">
+                        No hay médicos disponibles con estos filtros
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Prueba a cambiar la mutua, el profesional o la fecha
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  doctorsToDisplay.map((doctor) => (
+                    <DoctorResultCard
+                      key={doctor.id}
+                      doctor={doctor}
+                      service={selectedService!}
+                      insuranceIds={doctorIns[doctor.id] ?? []}
+                      allInsurances={insurances}
+                      slots={weekSlots[doctor.id] ?? {}}
+                      dates={dates}
+                      timezone={clinic.timezone}
+                      timeOfDay={filters.timeOfDay}
+                      onSlotClick={handleSlotClick}
+                    />
+                  ))
+                )}
+              </div>
+            )
           )}
 
+          {/* ─── FASE 3: Doctor selection modal ─────────────────────────── */}
+          {doctorSelectionModal.open && doctorSelectionModal.slotStart && (
+            <DoctorSelectionModal
+              open={doctorSelectionModal.open}
+              onOpenChange={(open) =>
+                setDoctorSelectionModal((prev) => ({ ...prev, open }))
+              }
+              slotLabel={formatTime(doctorSelectionModal.slotStart, clinic.timezone)}
+              doctors={doctorSelectionModal.doctors}
+              onSelect={handleDoctorSelected}
+            />
+          )}
+
+          {/* ─── FASE 4: Booking modal (patient data form) ──────────────── */}
           {modal.open && modal.service && modal.doctor && modal.slotStart && (
             <BookingModal
               open={modal.open}
