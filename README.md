@@ -181,4 +181,4 @@ All 8 tests cover: service selection â†’ doctor (specific or "any specialist") â
 | Patient privacy | Patients never create accounts; all writes via `SECURITY DEFINER` RPCs |
 | Admin access | Row-Level Security; profiles link users to their clinic |
 
-See [CONTEXT.md](CONTEXT.md) for full architectural decisions, schema documentation, and RPC function specs.
+See [PROJECT_STATE.md](PROJECT_STATE.md) for full architectural decisions, schema documentation, RPC specs, and known invariants.

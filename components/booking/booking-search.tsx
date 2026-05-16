@@ -229,10 +229,10 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
   const isPrevDisabled = filters.date <= todayString()
 
   function prevWeek() {
-    handleFilterChange({ date: addDays(parseISO(filters.date), -7).toISOString().slice(0, 10) })
+    handleFilterChange({ date: format(addDays(parseISO(filters.date), -7), 'yyyy-MM-dd') })
   }
   function nextWeek() {
-    handleFilterChange({ date: addDays(parseISO(filters.date), 7).toISOString().slice(0, 10) })
+    handleFilterChange({ date: format(addDays(parseISO(filters.date), 7), 'yyyy-MM-dd') })
   }
 
   // Doctors list filtered by insurance (and by specific doctor if selected).

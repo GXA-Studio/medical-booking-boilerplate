@@ -1,6 +1,6 @@
 # PROJECT STATE — Medical Booking Boilerplate
 > **Single source of truth** for all future sessions.  
-> Last updated: **2026-05-16** — Sprint de Hardening completado. OTP flow eliminado. Sec + Cruft audit.
+> Last updated: **2026-05-16** — Auditoría DST completada (SAFE). Parche paginación semanal. Sec + Cruft audit.
 
 ---
 
@@ -15,7 +15,7 @@
 | UI | shadcn/ui + Tailwind CSS | framer-motion para animaciones de pasos |
 | Cache / Rate-limit | Upstash Redis | 2 limiters activos: booking-ip, slots-ip |
 | Validación | Zod | En todos los Route Handlers públicos |
-| Fechas | date-fns-tz | Conversión UTC ↔ timezone local |
+| Fechas | date-fns v4 + date-fns-tz | `date-fns` para aritmética frontend; `date-fns-tz` disponible pero NO usado en paginación |
 
 ---
 
@@ -260,7 +260,50 @@ appointments     id, clinic_id, doctor_id, service_id,
 
 ---
 
-## 8. Git — Estado del Repositorio
+## 8. Invariantes Técnicos — NO Romper
+
+### 8.1 DST y Zona Horaria (Auditado 2026-05-16)
+
+La RPC `get_slots_for_service` (y `get_available_slots`) es **DST-safe**. El invariante crítico está en estas líneas SQL:
+
+```sql
+v_win_start := timezone(r_doc.doc_tz, (p_date + r_sched.start_time)::TIMESTAMP);
+v_win_end   := timezone(r_doc.doc_tz, (p_date + r_sched.end_time)::TIMESTAMP);
+```
+
+`timezone(zone, TIMESTAMP)` consulta la base de datos IANA por fecha concreta → el offset UTC+2 (verano) vs UTC+1 (invierno) se aplica automáticamente. **Nunca añadir offsets hardcodeados ni usar `AT TIME ZONE` con `TIMESTAMPTZ` como input.**
+
+Prueba empírica ejecutada en producción: `10:00 local` en mayo (CEST) → `08:00 UTC`; `10:00 local` en noviembre (CET) → `09:00 UTC`. Readback local siempre = `10:00` ✓
+
+### 8.2 Paginación Semanal — Invariante de Navegación
+
+`parseISO('YYYY-MM-DD')` en date-fns v4 devuelve medianoche **local** (no UTC). La conversión `.toISOString().slice(0,10)` introduce un desplazamiento de −1 día en zonas UTC+ al escribir el estado de navegación.
+
+**Patrón correcto** (en `booking-search.tsx`):
+
+```typescript
+// ✅ Correcto — extrae fecha local
+format(addDays(parseISO(filters.date), 7),  'yyyy-MM-dd')
+format(addDays(parseISO(filters.date), -7), 'yyyy-MM-dd')
+
+// ❌ Roto en UTC+ (p. ej. Europe/Madrid) — convierte a UTC perdiendo el offset
+addDays(parseISO(filters.date), 7).toISOString().slice(0, 10)
+```
+
+**Patrón correcto para `today` local** (en `search-bar.tsx`):
+
+```typescript
+// ✅ Correcto — usa getFullYear/getMonth/getDate (hora local del navegador)
+const now = new Date()
+const today = [now.getFullYear(), String(now.getMonth()+1).padStart(2,'0'), String(now.getDate()).padStart(2,'0')].join('-')
+
+// ❌ Roto — devuelve fecha UTC, puede ser ayer entre 00:00–02:00 CEST
+new Date().toISOString().slice(0, 10)
+```
+
+---
+
+## 9. Git — Estado del Repositorio
 
 **Remote**: `https://github.com/GXA-Studio/medical-booking-boilerplate.git`  
 **Vercel**: `https://medical-booking-boilerplate.vercel.app`  
