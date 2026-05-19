@@ -24,6 +24,7 @@ function AppointmentsTableSkeleton() {
           </Card>
         ))}
       </div>
+      <Skeleton className="h-9 w-full" />
       <div className="flex flex-wrap gap-3">
         <Skeleton className="h-9 w-40" />
         <Skeleton className="h-9 w-44" />
@@ -63,11 +64,13 @@ async function AppointmentsSection({
   timezone,
   status,
   date,
+  q,
 }: {
   clinicId: string
   timezone: string
   status?: string
   date?: string
+  q?: string
 }) {
   const supabase = await createClient()
 
@@ -89,6 +92,15 @@ async function AppointmentsSection({
     const dayStart = new Date(date + 'T00:00:00.000Z').toISOString()
     const dayEnd   = new Date(date + 'T23:59:59.999Z').toISOString()
     query = query.gte('starts_at', dayStart).lte('starts_at', dayEnd)
+  }
+  if (q?.trim()) {
+    // Strip characters that are delimiters in PostgREST's .or() syntax
+    const safe = q.trim().slice(0, 100).replace(/[,()]/g, '')
+    if (safe) {
+      query = query.or(
+        `patient_name.ilike.%${safe}%,patient_phone.ilike.%${safe}%`
+      )
+    }
   }
 
   const { data: appointments } = await query
@@ -121,9 +133,9 @@ async function DialogLoader({ clinicId }: { clinicId: string }) {
 export default async function AppointmentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; date?: string }>
+  searchParams: Promise<{ status?: string; date?: string; q?: string }>
 }) {
-  const { status, date } = await searchParams
+  const { status, date, q } = await searchParams
   const { clinicId, timezone } = await getAdminProfile()
 
   return (
@@ -154,6 +166,7 @@ export default async function AppointmentsPage({
           timezone={timezone}
           status={status}
           date={date}
+          q={q}
         />
       </Suspense>
     </div>

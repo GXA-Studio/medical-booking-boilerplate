@@ -1,5 +1,5 @@
 'use client'
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { cancelAppointment } from '@/app/(admin)/admin/appointments/actions'
 import { Button } from '@/components/ui/button'
@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/hooks/use-toast'
-import { XCircle, Loader2, CalendarDays, Phone, User, Stethoscope } from 'lucide-react'
+import { XCircle, Loader2, CalendarDays, Phone, User, Stethoscope, Search } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,12 +70,28 @@ export function AppointmentsTable({
 
   const statusFilter = searchParams.get('status') ?? 'all'
   const dateFilter   = searchParams.get('date') ?? ''
+  const searchQuery  = searchParams.get('q') ?? ''
+
+  const [inputValue,  setInputValue]  = useState(searchQuery)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function updateFilter(key: string, value: string) {
     const params = new URLSearchParams(searchParams.toString())
     if (value && value !== 'all') params.set(key, value)
     else params.delete(key)
     router.push(`${pathname}?${params.toString()}`, { scroll: false })
+  }
+
+  function handleSearch(value: string) {
+    setInputValue(value)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString())
+      const trimmed = value.trim()
+      if (trimmed) params.set('q', trimmed)
+      else params.delete('q')
+      router.push(`${pathname}?${params.toString()}`, { scroll: false })
+    }, 300)
   }
 
   function handleCancel() {
@@ -115,6 +131,18 @@ export function AppointmentsTable({
         ))}
       </div>
 
+      {/* Search input */}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="search"
+          placeholder="Buscar por nombre o teléfono..."
+          value={inputValue}
+          onChange={(e) => handleSearch(e.target.value)}
+          className="pl-9"
+        />
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
         <Select value={statusFilter} onValueChange={(v) => updateFilter('status', v)}>
@@ -133,8 +161,15 @@ export function AppointmentsTable({
           value={dateFilter}
           onChange={(e) => updateFilter('date', e.target.value)}
         />
-        {(statusFilter !== 'all' || dateFilter) && (
-          <Button variant="ghost" size="sm" onClick={() => router.push(pathname, { scroll: false })}>
+        {(statusFilter !== 'all' || dateFilter || inputValue) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setInputValue('')
+              router.push(pathname, { scroll: false })
+            }}
+          >
             Limpiar filtros
           </Button>
         )}
