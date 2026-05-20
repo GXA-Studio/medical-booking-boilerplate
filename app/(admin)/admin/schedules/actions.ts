@@ -1,7 +1,9 @@
 'use server'
+import { after } from 'next/server'
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { invalidateBookingCache } from '@/lib/cache'
+import { sendCancellationWhatsApp } from '@/lib/twilio/client'
 import type { TablesInsert } from '@/lib/supabase/types'
 import { z } from 'zod'
 
@@ -122,6 +124,16 @@ export type ExceptionInput =
       end_time:       string
     }
 
+// Conflicting appointment summary returned by checkExceptionConflicts —
+// the schedule editor uses it to drive the AlertDialog warning.
+export interface ConflictAppointment {
+  id:            string
+  patient_name:  string
+  patient_phone: string
+  starts_at:     string
+  ends_at:       string
+}
+
 const ExceptionSchema = z.object({
   doctor_id:      z.string().uuid(),
   exception_date: z.string().regex(DATE_RE),
@@ -153,7 +165,80 @@ function todayLocalISO(): string {
   ].join('-')
 }
 
-export async function createScheduleException(input: ExceptionInput) {
+// ─── Conflict detection ─────────────────────────────────────────────────────
+// Returns the confirmed appointments that overlap with the proposed exception.
+//   full-day → every confirmed appointment for that doctor on that date
+//   partial  → confirmed appointments whose [starts_at, ends_at) overlaps with
+//              [exception_date + start_time, exception_date + end_time)
+//              (computed in the clinic's timezone)
+export async function checkExceptionConflicts(input: ExceptionInput): Promise<{
+  conflicts:   ConflictAppointment[]
+  totalCount:  number
+} | { error: string }> {
+  const parsed = ExceptionSchema.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Datos inválidos.' }
+  }
+
+  const supabase = await createClient()
+  await assertDoctorOwnership(supabase, parsed.data.doctor_id)
+
+  // Resolve clinic timezone via the doctor's clinic
+  const { data: doctorRow } = await supabase
+    .from('doctors')
+    .select('clinic_id, clinics(timezone)')
+    .eq('id', parsed.data.doctor_id)
+    .single()
+  const timezone = (doctorRow?.clinics as { timezone: string } | null)?.timezone ?? 'UTC'
+
+  // Build the UTC window we need to check overlap against
+  const dateStr = parsed.data.exception_date
+  let windowStartUtc: Date
+  let windowEndUtc:   Date
+  if (parsed.data.kind === 'full-day') {
+    windowStartUtc = utcFromClinicLocal(`${dateStr}T00:00:00`, timezone)
+    windowEndUtc   = utcFromClinicLocal(`${dateStr}T23:59:59.999`, timezone)
+  } else {
+    windowStartUtc = utcFromClinicLocal(`${dateStr}T${parsed.data.start_time!}:00`, timezone)
+    windowEndUtc   = utcFromClinicLocal(`${dateStr}T${parsed.data.end_time!}:00`, timezone)
+  }
+
+  // Fetch confirmed appointments for the doctor whose [starts_at, ends_at)
+  // overlaps the window. The overlap predicate `a.starts < window_end AND a.ends > window_start`
+  // is expressed as two range filters via PostgREST.
+  const { data: rows, error } = await supabase
+    .from('appointments')
+    .select('id, patient_name, patient_phone, starts_at, ends_at')
+    .eq('doctor_id', parsed.data.doctor_id)
+    .eq('status', 'confirmed')
+    .lt('starts_at', windowEndUtc.toISOString())
+    .gt('ends_at',   windowStartUtc.toISOString())
+    .order('starts_at', { ascending: true })
+
+  if (error) {
+    console.error('[checkExceptionConflicts] DB error:', error)
+    return { error: 'No se pudo verificar el solapamiento de citas.' }
+  }
+
+  return {
+    conflicts:  (rows ?? []) as ConflictAppointment[],
+    totalCount: (rows ?? []).length,
+  }
+}
+
+// Local datetime ("YYYY-MM-DDTHH:MM[:SS][.SSS]") + IANA TZ → UTC Date.
+// Reuses date-fns-tz to stay DST-safe (same library used elsewhere in this codebase).
+function utcFromClinicLocal(localDateTime: string, tz: string): Date {
+  // Lazy require to avoid bundling overhead in the hot path of public routes.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { fromZonedTime } = require('date-fns-tz') as typeof import('date-fns-tz')
+  return fromZonedTime(localDateTime, tz)
+}
+
+export async function createScheduleException(
+  input: ExceptionInput,
+  options?: { cancelOverlapping?: boolean },
+) {
   const parsed = ExceptionSchema.safeParse(input)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Datos inválidos.' }
@@ -187,8 +272,6 @@ export async function createScheduleException(input: ExceptionInput) {
   const { error } = await supabase.from('doctor_schedule_exceptions').insert(row)
 
   if (error) {
-    // Unique index on (doctor, date, is_working, COALESCE start, COALESCE end)
-    // prevents identical duplicates — surface a friendly message.
     if (error.code === '23505') {
       return { error: 'Ya existe una excepción idéntica para esa fecha y rango.' }
     }
@@ -196,8 +279,95 @@ export async function createScheduleException(input: ExceptionInput) {
     return { error: 'Error al guardar la excepción.' }
   }
 
+  // Optional: cancel overlapping confirmed appointments and notify patients.
+  // Bookkeeping for the caller (UI toast) so we can report what we cleaned up.
+  let cancelledCount = 0
+  if (options?.cancelOverlapping) {
+    cancelledCount = await cancelOverlappingAppointments({
+      doctorId: parsed.data.doctor_id,
+      kind:     parsed.data.kind,
+      date:     parsed.data.exception_date,
+      startHM:  parsed.data.kind === 'partial' ? parsed.data.start_time! : null,
+      endHM:    parsed.data.kind === 'partial' ? parsed.data.end_time!   : null,
+    })
+  }
+
   await bustSlotCaches(clinicSlug)
-  return { success: true }
+  return { success: true, cancelledCount }
+}
+
+// Finds confirmed appointments overlapping the exception window, marks them
+// as cancelled in a single UPDATE, then defers Twilio notifications via
+// after() + Promise.allSettled so the response stays fast (Vercel will keep
+// the function alive until the WhatsApp calls resolve).
+async function cancelOverlappingAppointments(args: {
+  doctorId: string
+  kind:     'full-day' | 'partial'
+  date:     string
+  startHM:  string | null
+  endHM:    string | null
+}): Promise<number> {
+  const supabase = await createClient()
+
+  const { data: doctorRow } = await supabase
+    .from('doctors')
+    .select('clinic_id, clinics(name, timezone)')
+    .eq('id', args.doctorId)
+    .single()
+  const clinic = doctorRow?.clinics as { name: string; timezone: string } | null
+  const timezone   = clinic?.timezone ?? 'UTC'
+  const clinicName = clinic?.name     ?? 'la clínica'
+
+  let windowStartUtc: Date
+  let windowEndUtc:   Date
+  if (args.kind === 'full-day') {
+    windowStartUtc = utcFromClinicLocal(`${args.date}T00:00:00`, timezone)
+    windowEndUtc   = utcFromClinicLocal(`${args.date}T23:59:59.999`, timezone)
+  } else {
+    windowStartUtc = utcFromClinicLocal(`${args.date}T${args.startHM!}:00`, timezone)
+    windowEndUtc   = utcFromClinicLocal(`${args.date}T${args.endHM!}:00`, timezone)
+  }
+
+  // Service-role client to bypass RLS for the bulk update + notify pipeline.
+  const svc = createServiceClient()
+  const { data: cancelled, error } = await svc
+    .from('appointments')
+    .update({ status: 'cancelled' })
+    .eq('doctor_id', args.doctorId)
+    .eq('status', 'confirmed')
+    .lt('starts_at', windowEndUtc.toISOString())
+    .gt('ends_at',   windowStartUtc.toISOString())
+    .select('id, patient_name, patient_phone, starts_at')
+
+  if (error) {
+    console.error('[cancelOverlappingAppointments] DB error:', error)
+    return 0
+  }
+
+  const rows = cancelled ?? []
+  if (rows.length === 0) return 0
+
+  // Defer Twilio so the action returns immediately. Promise.allSettled keeps
+  // one failed send from blocking the others.
+  after(async () => {
+    const results = await Promise.allSettled(
+      rows.map((r) =>
+        sendCancellationWhatsApp({
+          to:          r.patient_phone as string,
+          patientName: r.patient_name as string,
+          clinicName,
+          startsAt:    r.starts_at as string,
+          timezone,
+        })
+      )
+    )
+    const failed = results.filter((r) => r.status === 'rejected').length
+    if (failed > 0) {
+      console.error(`[cancelOverlappingAppointments] ${failed}/${rows.length} WhatsApp sends failed`)
+    }
+  })
+
+  return rows.length
 }
 
 export async function deleteScheduleException(id: string) {

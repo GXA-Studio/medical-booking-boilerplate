@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getAdminProfile } from '@/lib/admin/profile'
 import { DayNav } from '@/components/admin/day-nav'
 import { DailyResourceGrid } from '@/components/admin/daily-resource-grid'
-import type { GridDoctor, GridSchedule, GridAppointment, GridService } from '@/components/admin/daily-resource-grid'
+import type { GridDoctor, GridSchedule, GridAppointment, GridService, GridException } from '@/components/admin/daily-resource-grid'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // ─── Skeleton shown during streaming ──────────────────────────────────────────
@@ -61,11 +61,12 @@ async function AgendaContent({
   const doctors    = (rawDoctors ?? []) as GridDoctor[]
   const doctorIds  = doctors.map(d => d.id)
 
-  // 2 + 3 + 4. Fetch schedules, appointments and services in parallel
+  // 2 + 3 + 4 + 5. Fetch schedules, appointments, services and exceptions in parallel
   const [
     { data: rawSchedules },
     { data: rawAppointments },
     { data: rawServices },
+    { data: rawExceptions },
   ] = await Promise.all([
     // Schedules for this day_of_week (empty if no doctors)
     doctorIds.length > 0
@@ -93,6 +94,16 @@ async function AgendaContent({
       .eq('clinic_id', clinicId)
       .eq('is_active', true)
       .order('name'),
+
+    // Schedule exceptions for the day (full-day off + partial blocks).
+    // The grid renders these as striped overlays per doctor.
+    doctorIds.length > 0
+      ? supabase
+          .from('doctor_schedule_exceptions')
+          .select('id, doctor_id, exception_date, is_working, start_time, end_time')
+          .in('doctor_id', doctorIds)
+          .eq('exception_date', date)
+      : Promise.resolve({ data: [] as GridException[], error: null }),
   ])
 
   return (
@@ -103,6 +114,7 @@ async function AgendaContent({
       schedules={(rawSchedules ?? []) as GridSchedule[]}
       appointments={(rawAppointments ?? []) as GridAppointment[]}
       services={(rawServices ?? []) as GridService[]}
+      exceptions={(rawExceptions ?? []) as GridException[]}
     />
   )
 }

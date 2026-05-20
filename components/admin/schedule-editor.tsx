@@ -2,19 +2,24 @@
 import { useState, useTransition, useOptimistic } from 'react'
 import {
   createSchedule, deleteSchedule, toggleSchedule,
-  createScheduleException, deleteScheduleException,
+  createScheduleException, deleteScheduleException, checkExceptionConflicts,
+  type ExceptionInput, type ConflictAppointment,
 } from '@/app/(admin)/admin/schedules/actions'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
+} from '@/components/ui/alert-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
-  Plus, Trash2, Loader2, Clock, CalendarOff, CalendarCheck, Ban,
+  Plus, Trash2, Loader2, Clock, CalendarOff, CalendarCheck, Ban, AlertTriangle,
 } from 'lucide-react'
 
 const DAYS_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
@@ -116,6 +121,14 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
   const [excStart, setExcStart] = useState('14:00')
   const [excEnd, setExcEnd] = useState('16:00')
 
+  // Conflict warning state — when a proposed exception overlaps confirmed appts,
+  // we stash the input and the conflict list here and ask the admin to confirm.
+  const [conflictWarning, setConflictWarning] = useState<{
+    input:     ExceptionInput
+    conflicts: ConflictAppointment[]
+  } | null>(null)
+  const [checkingConflicts, setCheckingConflicts] = useState(false)
+
   const [pending, start] = useTransition()
   const [optimisticDoctors, dispatchOptimistic] =
     useOptimistic(initialDoctors, applyOptimistic)
@@ -168,34 +181,66 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
     setExceptionDialogOpen(true)
   }
 
-  function handleSaveException(e: React.FormEvent<HTMLFormElement>) {
+  function buildExceptionInput(): ExceptionInput {
+    return excKind === 'full-day'
+      ? { doctor_id: activeDoctorId, exception_date: excDate, kind: 'full-day' as const }
+      : {
+          doctor_id:      activeDoctorId,
+          exception_date: excDate,
+          kind:           'partial' as const,
+          start_time:     excStart,
+          end_time:       excEnd,
+        }
+  }
+
+  // Submit handler — runs the conflict check first. If conflicts exist, opens
+  // the AlertDialog (warning step). Otherwise saves immediately.
+  async function handleSaveException(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    const input = buildExceptionInput()
+    setCheckingConflicts(true)
+    const check = await checkExceptionConflicts(input)
+    setCheckingConflicts(false)
+
+    if ('error' in check) {
+      toast({ variant: 'destructive', title: 'Error', description: check.error })
+      return
+    }
+
+    if (check.totalCount > 0) {
+      setConflictWarning({ input, conflicts: check.conflicts })
+      return
+    }
+    persistException(input, { cancelOverlapping: false })
+  }
+
+  function persistException(input: ExceptionInput, options: { cancelOverlapping: boolean }) {
     start(async () => {
-      const input =
-        excKind === 'full-day'
-          ? { doctor_id: activeDoctorId, exception_date: excDate, kind: 'full-day' as const }
-          : {
-              doctor_id:      activeDoctorId,
-              exception_date: excDate,
-              kind:           'partial' as const,
-              start_time:     excStart,
-              end_time:       excEnd,
-            }
-      const result = await createScheduleException(input)
-      if (result.error) {
+      const result = await createScheduleException(input, options)
+      if ('error' in result && result.error) {
         toast({ variant: 'destructive', title: 'Error', description: result.error })
         return
       }
+      const cancelledCount = 'cancelledCount' in result ? result.cancelledCount ?? 0 : 0
       toast({
         variant: 'success',
-        title: 'Excepción guardada',
+        title:   'Excepción guardada',
         description:
-          excKind === 'full-day'
-            ? `Día libre el ${formatDateEs(excDate)}.`
-            : `Bloqueo de ${excStart} a ${excEnd} el ${formatDateEs(excDate)}.`,
+          (input.kind === 'full-day'
+            ? `Día libre el ${formatDateEs(input.exception_date)}.`
+            : `Bloqueo de ${input.start_time} a ${input.end_time} el ${formatDateEs(input.exception_date)}.`) +
+          (cancelledCount > 0
+            ? ` ${cancelledCount} cita${cancelledCount === 1 ? '' : 's'} cancelada${cancelledCount === 1 ? '' : 's'} y avisadas por WhatsApp.`
+            : ''),
       })
       setExceptionDialogOpen(false)
+      setConflictWarning(null)
     })
+  }
+
+  function handleConfirmConflict() {
+    if (!conflictWarning) return
+    persistException(conflictWarning.input, { cancelOverlapping: true })
   }
 
   function handleDeleteException(id: string) {
@@ -523,13 +568,79 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
               <Button type="button" variant="outline" onClick={() => setExceptionDialogOpen(false)}>
                 Cancelar
               </Button>
-              <Button type="submit" disabled={pending}>
-                {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Guardando…</> : 'Guardar excepción'}
+              <Button type="submit" disabled={pending || checkingConflicts}>
+                {checkingConflicts
+                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Comprobando…</>
+                  : pending
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Guardando…</>
+                    : 'Guardar excepción'}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* ── Conflict warning ─────────────────────────────────────────────── */}
+      <AlertDialog
+        open={conflictWarning !== null}
+        onOpenChange={(open) => { if (!open) setConflictWarning(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-rose-700">
+              <AlertTriangle className="h-5 w-5" />
+              Atención: Hay citas programadas
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {conflictWarning && (
+                <>
+                  Crear esta excepción cancelará automáticamente{' '}
+                  <strong>{conflictWarning.conflicts.length}</strong>{' '}
+                  cita{conflictWarning.conflicts.length === 1 ? '' : 's'}.{' '}
+                  Se enviará un WhatsApp a los pacientes pidiendo que reprogramen.
+                  ¿Deseas continuar?
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {conflictWarning && conflictWarning.conflicts.length > 0 && (
+            <div className="max-h-60 overflow-y-auto rounded-md border border-rose-200 bg-rose-50/50 p-2">
+              <ul className="space-y-1.5">
+                {conflictWarning.conflicts.map((c) => (
+                  <li
+                    key={c.id}
+                    className="flex items-center justify-between gap-3 rounded-md bg-white px-2.5 py-1.5 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-slate-800">{c.patient_name}</p>
+                      <p className="truncate text-slate-500">{c.patient_phone}</p>
+                    </div>
+                    <span className="shrink-0 font-mono text-[11px] text-slate-600">
+                      {new Date(c.starts_at).toLocaleTimeString('es-ES', {
+                        hour: '2-digit', minute: '2-digit',
+                      })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmConflict}
+              disabled={pending}
+              className="bg-rose-600 hover:bg-rose-700"
+            >
+              {pending
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> Cancelando citas…</>
+                : 'Sí, cancelar citas y bloquear'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

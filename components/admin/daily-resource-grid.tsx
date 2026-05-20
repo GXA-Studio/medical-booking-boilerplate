@@ -58,6 +58,15 @@ export interface GridService {
   color: string | null
 }
 
+export interface GridException {
+  id: string
+  doctor_id: string
+  exception_date: string       // YYYY-MM-DD clinic local
+  is_working: boolean
+  start_time: string | null    // "HH:MM:SS" clinic local TZ (null = full-day)
+  end_time: string | null
+}
+
 interface Props {
   date: string       // YYYY-MM-DD clinic local
   timezone: string
@@ -65,7 +74,19 @@ interface Props {
   schedules: GridSchedule[]
   appointments: GridAppointment[]
   services: GridService[]
+  exceptions: GridException[]
 }
+
+// Stripe backgrounds for exception overlays. Tailwind can't generate
+// arbitrary gradients dynamically, so we inline these as style objects.
+const FULL_DAY_BG = 'rgba(244, 63, 94, 0.45)' // rose-500 @ 45%
+const PARTIAL_BG  = 'rgba(245, 158, 11, 0.45)' // amber-500 @ 45%
+
+const stripedBackground = (base: string) => ({
+  backgroundColor: base,
+  backgroundImage:
+    'repeating-linear-gradient(45deg, rgba(255,255,255,0.45), rgba(255,255,255,0.45) 8px, transparent 8px, transparent 16px)',
+})
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 function getLocalHM(utcIso: string, tz: string): { h: number; m: number } {
@@ -88,15 +109,32 @@ function slotIndexToUtcIso(date: string, slotIndex: number, tz: string): string 
   ).toISOString()
 }
 
-function isSlotWorking(slotIndex: number, blocks: GridSchedule[]): boolean {
+function isSlotWorking(
+  slotIndex: number,
+  blocks: GridSchedule[],
+  ex?: { fullDay: boolean; partials: GridException[] },
+): boolean {
+  if (ex?.fullDay) return false
   const slotStart = slotIndex * SLOT_MINUTES
-  return blocks.some(b => {
+  const slotEnd   = slotStart + SLOT_MINUTES
+  const insideSchedule = blocks.some(b => {
     const [bh, bm] = b.start_time.split(':').map(Number)
     const [eh, em] = b.end_time.split(':').map(Number)
     const blockStart = (bh - GRID_START_HOUR) * 60 + bm
     const blockEnd   = (eh - GRID_START_HOUR) * 60 + em
     return slotStart >= blockStart && slotStart < blockEnd
   })
+  if (!insideSchedule) return false
+  // Reject if slot overlaps any partial-block exception
+  const inPartial = (ex?.partials ?? []).some(p => {
+    if (!p.start_time || !p.end_time) return false
+    const [bh, bm] = p.start_time.split(':').map(Number)
+    const [eh, em] = p.end_time.split(':').map(Number)
+    const blockStart = (bh - GRID_START_HOUR) * 60 + bm
+    const blockEnd   = (eh - GRID_START_HOUR) * 60 + em
+    return slotStart < blockEnd && slotEnd > blockStart
+  })
+  return !inPartial
 }
 
 const SLOTS = Array.from({ length: TOTAL_SLOTS }, (_, i) => {
@@ -108,7 +146,7 @@ const SLOTS = Array.from({ length: TOTAL_SLOTS }, (_, i) => {
 
 // ─── Component ─────────────────────────────────────────────────────────────────
 export function DailyResourceGrid({
-  date, timezone, doctors, schedules, appointments, services,
+  date, timezone, doctors, schedules, appointments, services, exceptions,
 }: Props) {
   // Dialog state — create new appointment (empty cell click)
   const [createPrefill, setCreatePrefill] = useState<null | {
@@ -138,6 +176,24 @@ export function DailyResourceGrid({
     }
     return map
   }, [appointments])
+
+  const exceptionsByDoctor = useMemo(() => {
+    const map = new Map<string, { fullDay: boolean; partials: GridException[] }>()
+    for (const ex of exceptions) {
+      const existing = map.get(ex.doctor_id) ?? { fullDay: false, partials: [] }
+      // Full-day off rows have NULL hours and is_working=false.
+      // Partial blocks have hours and is_working=false.
+      // Legacy custom-windows (is_working=true) are NOT rendered as exceptions —
+      // they are the working windows themselves.
+      if (!ex.is_working && ex.start_time === null) {
+        existing.fullDay = true
+      } else if (!ex.is_working && ex.start_time !== null && ex.end_time !== null) {
+        existing.partials.push(ex)
+      }
+      map.set(ex.doctor_id, existing)
+    }
+    return map
+  }, [exceptions])
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
   function handleEmptyCellClick(doctorId: string, slotIndex: number) {
@@ -247,6 +303,7 @@ export function DailyResourceGrid({
             {doctors.map(doc => {
               const docSchedules = schedulesByDoctor.get(doc.id) ?? []
               const docAppts     = apptsByDoctor.get(doc.id) ?? []
+              const docExceptions = exceptionsByDoctor.get(doc.id)
 
               return (
                 <div
@@ -256,7 +313,7 @@ export function DailyResourceGrid({
                 >
                   {/* Background / click cells */}
                   {SLOTS.map((slot, i) => {
-                    const working = isSlotWorking(i, docSchedules)
+                    const working = isSlotWorking(i, docSchedules, docExceptions)
                     return (
                       <div
                         key={i}
@@ -278,6 +335,61 @@ export function DailyResourceGrid({
                         }}
                         onClick={() => working && handleEmptyCellClick(doc.id, i)}
                       />
+                    )
+                  })}
+
+                  {/* Exception overlays (rendered above background, below appointments) */}
+                  {docExceptions?.fullDay && (
+                    <div
+                      className="pointer-events-none absolute inset-x-1 z-[5] flex items-center justify-center rounded-md border border-rose-300 text-center"
+                      style={{
+                        top: 2,
+                        height: totalGridHeight - 4,
+                        ...stripedBackground(FULL_DAY_BG),
+                      }}
+                      title="Día No Disponible"
+                    >
+                      <div className="rotate-[-15deg] rounded-md bg-white/80 px-3 py-1.5 shadow-sm">
+                        <p className="text-xs font-bold uppercase tracking-wider text-rose-700">
+                          Día No Disponible
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {!docExceptions?.fullDay && (docExceptions?.partials ?? []).map(p => {
+                    const [sh, sm] = p.start_time!.split(':').map(Number)
+                    const [eh, em] = p.end_time!.split(':').map(Number)
+                    const startMins = (sh - GRID_START_HOUR) * 60 + sm
+                    const endMins   = (eh - GRID_START_HOUR) * 60 + em
+                    // Clamp the visible range to the grid window
+                    const visStart  = Math.max(0, startMins)
+                    const visEnd    = Math.min(TOTAL_SLOTS * SLOT_MINUTES, endMins)
+                    if (visEnd <= visStart) return null
+
+                    const topPx     = (visStart / SLOT_MINUTES) * SLOT_HEIGHT_PX
+                    const heightPx  = ((visEnd - visStart) / SLOT_MINUTES) * SLOT_HEIGHT_PX
+
+                    return (
+                      <div
+                        key={p.id}
+                        className="pointer-events-none absolute inset-x-1 z-[5] flex flex-col items-center justify-center rounded-md border border-amber-400"
+                        style={{
+                          top: topPx + 1,
+                          height: Math.max(20, heightPx - 2),
+                          ...stripedBackground(PARTIAL_BG),
+                        }}
+                        title={`Bloqueo horario ${p.start_time!.slice(0,5)}–${p.end_time!.slice(0,5)}`}
+                      >
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-900">
+                          Bloqueo Horario
+                        </p>
+                        {heightPx > 36 && (
+                          <p className="text-[10px] font-mono text-amber-900/80">
+                            {p.start_time!.slice(0,5)}–{p.end_time!.slice(0,5)}
+                          </p>
+                        )}
+                      </div>
                     )
                   })}
 
