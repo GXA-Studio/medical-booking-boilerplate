@@ -2,7 +2,7 @@
 import { useState, useTransition, useOptimistic } from 'react'
 import {
   createSchedule, deleteSchedule, toggleSchedule,
-  upsertScheduleException, toggleExceptionWorking, deleteScheduleException,
+  createScheduleException, deleteScheduleException,
 } from '@/app/(admin)/admin/schedules/actions'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -14,12 +14,11 @@ import { Input } from '@/components/ui/input'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import {
-  Plus, Trash2, Loader2, Clock, CalendarOff, CalendarCheck,
+  Plus, Trash2, Loader2, Clock, CalendarOff, CalendarCheck, Ban,
 } from 'lucide-react'
 
 const DAYS_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
 const DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
-// Iterate week starting on Monday for nicer reading
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
 
 interface ScheduleRow {
@@ -55,7 +54,6 @@ function formatTime(t: string | null) {
 }
 
 function formatDateEs(iso: string) {
-  // iso is YYYY-MM-DD — build a local-date string without TZ surprises
   const [y, m, d] = iso.split('-').map(Number)
   const date = new Date(y, m - 1, d)
   return date.toLocaleDateString('es-ES', {
@@ -72,11 +70,19 @@ function todayLocal() {
   ].join('-')
 }
 
+// Each exception row in the new model is a "block":
+//   start_time === null  → full day off
+//   start_time !== null  → partial range block
+type ExceptionKind = 'full-day' | 'partial'
+
+function exceptionKind(ex: ExceptionRow): ExceptionKind {
+  return ex.start_time === null ? 'full-day' : 'partial'
+}
+
 // ─── Optimistic reducer ──────────────────────────────────────────────────────
 type OptimisticAction =
   | { type: 'toggle-schedule'; id: string; active: boolean }
   | { type: 'delete-schedule'; id: string }
-  | { type: 'toggle-exception'; id: string; isWorking: boolean }
   | { type: 'delete-exception'; id: string }
 
 function applyOptimistic(state: DoctorWithSchedules[], action: OptimisticAction): DoctorWithSchedules[] {
@@ -91,29 +97,24 @@ function applyOptimistic(state: DoctorWithSchedules[], action: OptimisticAction)
         }
       case 'delete-schedule':
         return { ...doc, schedules: doc.schedules.filter((s) => s.id !== action.id) }
-      case 'toggle-exception':
-        return {
-          ...doc,
-          exceptions: doc.exceptions.map((e) =>
-            e.id === action.id ? { ...e, is_working: action.isWorking } : e
-          ),
-        }
       case 'delete-exception':
         return { ...doc, exceptions: doc.exceptions.filter((e) => e.id !== action.id) }
     }
   })
 }
 
+// ─── Component ───────────────────────────────────────────────────────────────
 export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWithSchedules[] }) {
   const [activeDoctorId, setActiveDoctorId] = useState<string>(initialDoctors[0]?.id ?? '')
   const [shiftDialogOpen, setShiftDialogOpen] = useState(false)
   const [addDay, setAddDay] = useState<string>('1')
 
+  // Exception dialog state
   const [exceptionDialogOpen, setExceptionDialogOpen] = useState(false)
+  const [excKind, setExcKind] = useState<ExceptionKind>('full-day')
   const [excDate, setExcDate] = useState(todayLocal())
-  const [excWorking, setExcWorking] = useState(false)
-  const [excStart, setExcStart] = useState('09:00')
-  const [excEnd, setExcEnd] = useState('14:00')
+  const [excStart, setExcStart] = useState('14:00')
+  const [excEnd, setExcEnd] = useState('16:00')
 
   const [pending, start] = useTransition()
   const [optimisticDoctors, dispatchOptimistic] =
@@ -127,7 +128,7 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
     return acc
   }, {})
 
-  // ── Weekly schedule handlers ────────────────────────────────────────────────
+  // ── Weekly schedule handlers ───────────────────────────────────────────────
   function handleAdd(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const fd = new FormData(e.currentTarget)
@@ -158,25 +159,29 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
     })
   }
 
-  // ── Exception handlers ──────────────────────────────────────────────────────
+  // ── Exception handlers ─────────────────────────────────────────────────────
   function openExceptionDialog() {
+    setExcKind('full-day')
     setExcDate(todayLocal())
-    setExcWorking(false)
-    setExcStart('09:00')
-    setExcEnd('14:00')
+    setExcStart('14:00')
+    setExcEnd('16:00')
     setExceptionDialogOpen(true)
   }
 
   function handleSaveException(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     start(async () => {
-      const result = await upsertScheduleException({
-        doctor_id:      activeDoctorId,
-        exception_date: excDate,
-        is_working:     excWorking,
-        start_time:     excWorking ? excStart : null,
-        end_time:       excWorking ? excEnd   : null,
-      })
+      const input =
+        excKind === 'full-day'
+          ? { doctor_id: activeDoctorId, exception_date: excDate, kind: 'full-day' as const }
+          : {
+              doctor_id:      activeDoctorId,
+              exception_date: excDate,
+              kind:           'partial' as const,
+              start_time:     excStart,
+              end_time:       excEnd,
+            }
+      const result = await createScheduleException(input)
       if (result.error) {
         toast({ variant: 'destructive', title: 'Error', description: result.error })
         return
@@ -184,31 +189,12 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
       toast({
         variant: 'success',
         title: 'Excepción guardada',
-        description: excWorking
-          ? `Trabaja ${formatDateEs(excDate)} de ${excStart} a ${excEnd}.`
-          : `No trabaja el ${formatDateEs(excDate)}.`,
+        description:
+          excKind === 'full-day'
+            ? `Día libre el ${formatDateEs(excDate)}.`
+            : `Bloqueo de ${excStart} a ${excEnd} el ${formatDateEs(excDate)}.`,
       })
       setExceptionDialogOpen(false)
-    })
-  }
-
-  function handleToggleException(id: string, isWorking: boolean) {
-    // Only safe path: turning OFF working. Turning ON requires hours,
-    // so for that case open the edit dialog instead.
-    if (isWorking) {
-      toast({
-        variant: 'destructive',
-        title: 'Faltan horas',
-        description: 'Borra la excepción y vuelve a crearla con horas de trabajo.',
-      })
-      return
-    }
-    start(async () => {
-      dispatchOptimistic({ type: 'toggle-exception', id, isWorking })
-      const result = await toggleExceptionWorking(id, isWorking)
-      if (result.error) {
-        toast({ variant: 'destructive', title: 'Error', description: result.error })
-      }
     })
   }
 
@@ -254,9 +240,7 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
       <Card className="border-slate-200/70">
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
           <div className="min-w-0">
-            <CardTitle className="text-base font-semibold">
-              Horario semanal
-            </CardTitle>
+            <CardTitle className="text-base font-semibold">Horario semanal</CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
               {activeDoctor?.name}
               {activeDoctor?.specialty && ` · ${activeDoctor.specialty}`}
@@ -333,10 +317,10 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
           <div className="min-w-0">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
               <CalendarOff className="h-4 w-4 text-slate-500" />
-              Días específicos / Excepciones
+              Días Específicos / Excepciones
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Anula el horario semanal para una fecha concreta (vacaciones, festivos u horario modificado).
+              Bloquea un día entero o un tramo horario concreto (vacaciones, reuniones, descansos).
             </p>
           </div>
           <Button
@@ -354,63 +338,54 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
               <CalendarCheck className="h-8 w-8 text-slate-300" />
               <p className="text-sm text-slate-500">No hay excepciones programadas.</p>
               <p className="text-xs text-slate-400">
-                Añade una fecha para marcar día libre o modificar las horas.
+                Añade un día libre o un bloqueo horario para una fecha concreta.
               </p>
             </div>
           ) : (
             <ul className="space-y-1.5">
-              {activeDoctor!.exceptions.map((ex) => (
-                <li
-                  key={ex.id}
-                  className={cn(
-                    'flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors',
-                    ex.is_working
-                      ? 'border-emerald-200 bg-emerald-50/40'
-                      : 'border-rose-200 bg-rose-50/40'
-                  )}
-                >
-                  <div
+              {activeDoctor!.exceptions.map((ex) => {
+                const kind = exceptionKind(ex)
+                return (
+                  <li
+                    key={ex.id}
                     className={cn(
-                      'h-9 w-9 shrink-0 rounded-md flex items-center justify-center',
-                      ex.is_working ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                      'flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors',
+                      kind === 'full-day'
+                        ? 'border-rose-200 bg-rose-50/40'
+                        : 'border-amber-200 bg-amber-50/40'
                     )}
                   >
-                    {ex.is_working
-                      ? <CalendarCheck className="h-4 w-4" />
-                      : <CalendarOff className="h-4 w-4" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-800 capitalize">
-                      {formatDateEs(ex.exception_date)}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {ex.is_working
-                        ? <>Trabaja <span className="font-mono">{formatTime(ex.start_time)}–{formatTime(ex.end_time)}</span></>
-                        : 'No trabaja (día libre)'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] uppercase tracking-wider text-slate-400">
-                        Trabaja
-                      </span>
-                      <Switch
-                        checked={ex.is_working}
-                        onCheckedChange={(c) => handleToggleException(ex.id, c)}
-                        disabled={pending}
-                      />
+                    <div
+                      className={cn(
+                        'h-9 w-9 shrink-0 rounded-md flex items-center justify-center',
+                        kind === 'full-day' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                      )}
+                    >
+                      {kind === 'full-day'
+                        ? <CalendarOff className="h-4 w-4" />
+                        : <Ban className="h-4 w-4" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 capitalize">
+                        {formatDateEs(ex.exception_date)}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {kind === 'full-day'
+                          ? 'Día Completo Libre'
+                          : <>Bloqueo de <span className="font-mono">{formatTime(ex.start_time)}–{formatTime(ex.end_time)}</span></>}
+                      </p>
                     </div>
                     <button
                       onClick={() => handleDeleteException(ex.id)}
                       disabled={pending}
-                      className="p-1 text-rose-400 hover:text-rose-600 transition-colors"
+                      className="shrink-0 p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-100/50 rounded-md transition-colors"
                       aria-label="Eliminar excepción"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                )
+              })}
             </ul>
           )}
         </CardContent>
@@ -464,6 +439,49 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
             <DialogTitle>Nueva excepción — {activeDoctor?.name}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSaveException} className="space-y-4">
+            {/* Kind selector — two big tappable cards */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setExcKind('full-day')}
+                className={cn(
+                  'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-all',
+                  excKind === 'full-day'
+                    ? 'border-rose-300 bg-rose-50 ring-2 ring-rose-200'
+                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                )}
+              >
+                <CalendarOff className={cn(
+                  'h-4 w-4',
+                  excKind === 'full-day' ? 'text-rose-600' : 'text-slate-400'
+                )} />
+                <span className="text-sm font-semibold text-slate-800">Día Completo Libre</span>
+                <span className="text-[11px] text-slate-500 leading-tight">
+                  El día entero queda bloqueado. No se ofrecerán huecos.
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setExcKind('partial')}
+                className={cn(
+                  'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-all',
+                  excKind === 'partial'
+                    ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-200'
+                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                )}
+              >
+                <Ban className={cn(
+                  'h-4 w-4',
+                  excKind === 'partial' ? 'text-amber-600' : 'text-slate-400'
+                )} />
+                <span className="text-sm font-semibold text-slate-800">Bloqueo Horario Parcial</span>
+                <span className="text-[11px] text-slate-500 leading-tight">
+                  Solo se bloquea la franja indicada del día.
+                </span>
+              </button>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="exc_date">Fecha</Label>
               <Input
@@ -475,39 +493,32 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
                 required
               />
             </div>
-            <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50/50 px-3 py-2.5">
-              <div className="text-sm">
-                <p className="font-medium text-slate-800">¿Trabaja este día?</p>
-                <p className="text-xs text-slate-500">
-                  Si está apagado, no se ofrecerán huecos para la fecha.
-                </p>
-              </div>
-              <Switch checked={excWorking} onCheckedChange={setExcWorking} />
-            </div>
-            {excWorking && (
-              <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-1">
+
+            {excKind === 'partial' && (
+              <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-1 duration-200">
                 <div className="space-y-2">
-                  <Label htmlFor="exc_start">Inicio</Label>
+                  <Label htmlFor="exc_start">Inicio del bloqueo</Label>
                   <Input
                     id="exc_start"
                     type="time"
                     value={excStart}
                     onChange={(e) => setExcStart(e.target.value)}
-                    required={excWorking}
+                    required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="exc_end">Fin</Label>
+                  <Label htmlFor="exc_end">Fin del bloqueo</Label>
                   <Input
                     id="exc_end"
                     type="time"
                     value={excEnd}
                     onChange={(e) => setExcEnd(e.target.value)}
-                    required={excWorking}
+                    required
                   />
                 </div>
               </div>
             )}
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setExceptionDialogOpen(false)}>
                 Cancelar

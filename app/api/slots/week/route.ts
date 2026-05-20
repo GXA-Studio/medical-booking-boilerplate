@@ -96,6 +96,8 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(
     { dates, slots },
-    { headers: { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=60' } }
+    // no-store: schedule exceptions can change between requests; a 30s cache
+    // was masking exception writes (slots looked free for up to 30s after a block).
+    { headers: { 'Cache-Control': 'no-store, must-revalidate' } }
   )
 }

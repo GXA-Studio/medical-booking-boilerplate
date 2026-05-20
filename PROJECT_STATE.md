@@ -1,6 +1,6 @@
 # PROJECT STATE — Medical Booking Boilerplate
 > **Single source of truth** for all future sessions.  
-> Last updated: **2026-05-20** — Sistema de colores cromáticos para tarjetas de cita en `/admin/agenda`.
+> Last updated: **2026-05-20** — Bloqueos horarios parciales, HTTP no-store en /api/slots y herencia cromática reactiva.
 
 ---
 
@@ -157,14 +157,65 @@ Las tarjetas de cita en `/admin/agenda` (`DailyResourceGrid`) soportan categoriz
 - `ServiceSchema` (`services/actions.ts`) incluye `color: z.enum([...]).default('blue')`.
 
 **UX**:
-- `EditAppointmentDialog` — picker de 5 puntos circulares en la vista de detalles de citas futuras. Guardado optimista con rollback si la action falla.
+- `EditAppointmentDialog` — picker de 5 puntos circulares en la vista de detalles, **separado del flujo de Reprogramar**. Disparo instantáneo con `useTransition`: actualización óptica + rollback si la action falla.
 - `ServicesClient` — picker con etiquetas pill en el formulario de servicio; columna "Color" con pastilla coloreada en la tabla.
+
+**Repintado reactivo de la agenda**: `createService`, `updateService` y `toggleService` invalidan tanto `/admin/services` como `/admin/agenda`. Al cambiar el color por defecto de un servicio, las citas que heredan ese color (sin `appointments.color` propio) se repintan al instante en la agenda.
 
 **DB** (migración `20260520000000_add_color_columns.sql`):
 ```sql
 ALTER TABLE services     ADD COLUMN IF NOT EXISTS color text NOT NULL DEFAULT 'blue';
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS color text;
 ```
+
+### Sistema de Toasts (Notificaciones)
+
+`hooks/use-toast.ts` + `components/ui/toaster.tsx` — toaster propio (sin Radix) con auto-dismiss.
+
+- **Duración por defecto**: 3500 ms. Los toasts desaparecen solos sin requerir click.
+- **Override por toast**: `toast({ ..., duration: 6000 })` permite tiempo personalizado. `duration: 0` desactiva el auto-dismiss (sticky).
+- **Constante**: `DEFAULT_TOAST_DURATION` en `use-toast.ts`.
+
+### Horarios — Gestión, Bloqueos y Excepciones
+
+La pantalla `/admin/schedules` permite configurar el horario semanal recurrente y añadir excepciones puntuales que **restan disponibilidad** del horario semanal.
+
+**Componente**: `components/admin/schedule-editor.tsx` (Client). Recibe doctores con `schedules` y `exceptions` precargados desde el Server Component.
+
+**Layout**:
+- Tabs de médicos en la parte superior.
+- **Horario semanal**: lista de los 7 días (Lun → Dom), cada uno con sus turnos como pills `08:00–14:00` con switch y botón eliminar.
+- **Días Específicos / Excepciones**: tarjeta separada. El dialog "Añadir excepción" ofrece dos modos seleccionables como tarjetas grandes:
+  - **Día Completo Libre** (icon `CalendarOff`, rosa): bloquea el día entero.
+  - **Bloqueo Horario Parcial** (icon `Ban`, ámbar): bloquea solo la franja indicada (`start_time`–`end_time`).
+
+  La lista de excepciones diferencia ambos tipos visualmente (chip rosa para día completo, ámbar para bloqueo parcial) e indica el tramo bloqueado.
+
+**Modelo de datos**: cada excepción es una "resta" de disponibilidad. Se permiten **múltiples filas por fecha** (varios bloqueos en el mismo día — mañana + tarde, por ejemplo).
+
+**Optimistic UI**: `useOptimistic` + `useTransition` para toggles y deletes. La UI reacciona al instante.
+
+**Server Actions** (`app/(admin)/admin/schedules/actions.ts`):
+| Acción | Función |
+|---|---|
+| Crear turno semanal | `createSchedule(formData)` |
+| Activar/desactivar turno | `toggleSchedule(id, isActive)` |
+| Eliminar turno | `deleteSchedule(id)` |
+| Crear excepción (full-day o partial) | `createScheduleException({ doctor_id, exception_date, kind: 'full-day' \| 'partial', start_time?, end_time? })` |
+| Eliminar excepción | `deleteScheduleException(id)` |
+
+Todas las server actions invocan `bustSlotCaches(clinicSlug)` que: `revalidatePath('/admin/{schedules,agenda,appointments}')`, `revalidatePath('/{clinicSlug}')` y `invalidateBookingCache(clinicSlug)` (Upstash). Esto garantiza que tanto el calendario público como la agenda admin se repinten al instante tras un bloqueo.
+
+**Reglas de excepciones**:
+- **Sin** `UNIQUE(doctor_id, exception_date)` — múltiples filas por día permitidas.
+- Unique index parcial sobre `(doctor_id, exception_date, is_working, COALESCE(start_time, '00:00'), COALESCE(end_time, '00:00'))` para prevenir filas literalmente duplicadas.
+- CHECK constraint a nivel DB acepta 3 formas:
+  - `is_working=false, start_time=NULL, end_time=NULL` → Día Completo Libre
+  - `is_working=false, start_time NOT NULL, end_time NOT NULL, start<end` → Bloqueo Parcial
+  - `is_working=true, start_time NOT NULL, end_time NOT NULL, start<end` → ventana custom (legacy)
+- No se permiten excepciones para fechas pasadas (validado en la server action).
+
+**Integración en las RPCs**: ver §8.4 — `get_available_slots` y `get_slots_for_service` aplican: (1) si existe **un solo** row "Día Completo Libre" → 0 slots; (2) si existen rows `is_working=true` → usarlas como ventanas en lugar del horario semanal (legacy); (3) los slots generados se filtran excluyendo cualquiera cuyo `[start, end)` solape con un bloqueo parcial.
 
 ---
 
@@ -269,21 +320,30 @@ CRON_SECRET=                      # 32-byte hex random — pendiente de añadir 
 ### Tablas Principales
 
 ```
-clinics          id, name, slug*, timezone, phone, address, settings(jsonb)
-profiles         id→auth.users, clinic_id, full_name, role(admin|staff)
-services         id, clinic_id, name, duration_minutes, price, is_active,
-                 color(text, DEFAULT 'blue')
-doctors          id, clinic_id, name, email, specialty, avatar_url, is_active
-doctor_services  doctor_id, service_id  [PK composite]
-schedules        id, doctor_id, day_of_week(0-6), start_time, end_time, is_active
-appointments     id, clinic_id, doctor_id, service_id,
-                 patient_name, patient_phone,
-                 starts_at(UTC), ends_at(UTC),
-                 status(confirmed|cancelled),
-                 cancellation_token(UUID, UNIQUE),
-                 reminder_sent(BOOLEAN, DEFAULT false),
-                 notes,
-                 color(text, NULLABLE — override por cita; NULL = hereda services.color)
+clinics                       id, name, slug*, timezone, phone, address, settings(jsonb)
+profiles                      id→auth.users, clinic_id, full_name, role(admin|staff)
+services                      id, clinic_id, name, duration_minutes, price, is_active,
+                              color(text, DEFAULT 'blue')
+doctors                       id, clinic_id, name, email, specialty, avatar_url, is_active
+doctor_services               doctor_id, service_id  [PK composite]
+schedules                     id, doctor_id, day_of_week(0-6), start_time, end_time, is_active
+doctor_schedule_exceptions    id, doctor_id, exception_date, is_working(bool),
+                              start_time(time, NULLABLE), end_time(time, NULLABLE),
+                              UNIQUE index on (doctor_id, date, is_working,
+                                              COALESCE(start_time,'00:00'),
+                                              COALESCE(end_time,'00:00')),
+                              CHECK admite 3 formas:
+                                (is_working=false, hours NULL)         → día libre
+                                (is_working=false, hours NOT NULL)     → bloqueo parcial
+                                (is_working=true,  hours NOT NULL)     → ventana custom (legacy)
+appointments                  id, clinic_id, doctor_id, service_id,
+                              patient_name, patient_phone,
+                              starts_at(UTC), ends_at(UTC),
+                              status(confirmed|cancelled),
+                              cancellation_token(UUID, UNIQUE),
+                              reminder_sent(BOOLEAN, DEFAULT false),
+                              notes,
+                              color(text, NULLABLE — override por cita; NULL = hereda services.color)
 ```
 
 ### RPCs Activas
@@ -303,6 +363,8 @@ appointments     id, clinic_id, doctor_id, service_id,
 | `20260515_perf_indexes.sql` | 5 índices B-Tree (clínica, servicios, médicos, citas) |
 | `003_whatsapp_instant_booking.sql` | `cancellation_token`, `reminder_sent`, `book_slot_confirmed` RPC |
 | `20260520000000_add_color_columns.sql` | `services.color` (text DEFAULT 'blue') + `appointments.color` (text NULLABLE) |
+| `20260520100000_doctor_schedule_exceptions.sql` | tabla `doctor_schedule_exceptions` + RPCs `get_available_slots` y `get_slots_for_service` ahora exception-aware |
+| `20260520200000_partial_time_blocks.sql` | DROP UNIQUE en (doctor_id, exception_date) + CHECK extendido a 3 formas + RPCs reescritas para soportar bloqueos parciales y múltiples filas por día |
 
 ---
 
@@ -330,6 +392,44 @@ Las tarjetas de cita en `/admin/agenda` se colorean mediante un sistema de heren
 El diccionario de clases Tailwind vive en `lib/constants/colors.ts` y exporta `APPOINTMENT_COLORS` con claves estáticas. **NUNCA interpoler nombres de clase dinámicamente** (ej. `` `bg-${color}-50` ``) — Tailwind purgará esas clases en producción. Todos los valores del diccionario deben aparecer verbatim en el código fuente.
 
 Los colores válidos son: `'blue' | 'emerald' | 'purple' | 'amber' | 'rose'`. Este enum está validado tanto en el `ServiceSchema` (Zod) como en `adminUpdateAppointmentColor` (server action).
+
+### 8.4 Slot RPCs — Excepciones y Bloqueos
+
+Las RPCs `get_available_slots(doctor, service, date)` y `get_slots_for_service(service, date)` aplican 3 reglas en orden:
+
+```text
+1. ¿Existe alguna fila (is_working=false, start_time IS NULL)?
+   → SÍ: 0 slots (día completo libre). RETURN/CONTINUE.
+
+2. ¿Existen filas (is_working=true)?  (legacy "ventana custom")
+   → SÍ: usar esas filas como ventanas en lugar del horario semanal.
+   → NO: usar el horario semanal (`schedules` por day_of_week).
+
+3. Para cada hueco generado:
+   - Saltar si solapa con una appointment activa.
+   - Saltar si solapa con cualquier fila (is_working=false, start_time NOT NULL)
+     → ese es el "bloqueo parcial".
+```
+
+La iteración usa `UNION ALL` entre las ventanas-custom y el horario-semanal, condicionado por la variable `v_has_custom` calculada antes del loop.
+
+**Verificación matemática** (auditada 2026-05-20 contra DB real):
+- Baseline: schedule 05:00-17:00, servicio 30 min → 24 slots
+- + bloqueo parcial 14:00-16:00 → 20 slots (saltos: 14:00, 14:30, 15:00, 15:30) ✓
+- + dos bloqueos parciales (14:00-16:00 y 10:00-10:30) → 19 slots ✓
+- + fila "Día Completo Libre" → 0 slots ✓
+
+**Invariantes a no romper**:
+- El chequeo de "Día Completo Libre" debe ir ANTES de generar slots — si va después, gastarías ciclos generando huecos que vas a descartar igualmente.
+- En `get_slots_for_service` los 3 pasos se evalúan **por doctor** dentro del loop principal.
+- El overlap con bloqueos parciales se calcula con `tstzrange(..., ..., '[)')` `&&` — bordes exclusivos en el extremo superior (un slot que termina a las 14:00 no solapa con un bloqueo que empieza a las 14:00).
+- Los rangos se calculan con `timezone(zone, TIMESTAMP)` (DST-safe), nunca `AT TIME ZONE` sobre `TIMESTAMPTZ` (§8.1).
+
+### 8.5 HTTP Cache de /api/slots — no-store obligatorio
+
+Los endpoints `/api/slots` y `/api/slots/week` deben usar `Cache-Control: no-store, must-revalidate`. La cabecera previa `public, max-age=30, stale-while-revalidate=60` hacía que el navegador/CDN cachease respuestas de huecos hasta 30 segundos, **enmascarando** los bloqueos recién añadidos por el admin. Tras crear un bloqueo desde `/admin/schedules`, el cliente ve los huecos antiguos como disponibles durante hasta 30 segundos — ése era el bug reportado y resuelto en el commit `20260520-partial-blocks`.
+
+`/api/available-days` mantiene su cache de 5 min porque devuelve `day_of_week` estructural (no fechas concretas), insensible a excepciones.
 
 ### 8.3 Paginación Semanal — Invariante de Navegación
 
@@ -380,4 +480,7 @@ new Date().toISOString().slice(0, 10)
 | `049ad85` | feat: dead-end prevention — "Buscar próximo hueco libre" en WeeklyGrid |
 | `4901321` | feat(admin): smart fast-forward for next available slot in admin dialog |
 | `7b2ea2a` | feat(admin): implement server-side global search for appointments |
-| `(HEAD)` | docs: update PROJECT_STATE.md and README.md |
+| `1c88e21` | feat(admin): add chromatic color system for agenda appointment cards |
+| `4e84b20` | fix(admin): repair color swatches purged by Tailwind in production |
+| `806256b` | feat: instant color updates, auto-dismiss toasts, and optimistic doctor schedule exceptions |
+| `(HEAD)` | feat: partial time blocks, multiple exceptions per day, and no-store slots cache |

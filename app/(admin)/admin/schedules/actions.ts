@@ -1,6 +1,8 @@
 'use server'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { invalidateBookingCache } from '@/lib/cache'
+import type { TablesInsert } from '@/lib/supabase/types'
 import { z } from 'zod'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -14,12 +16,19 @@ const ScheduleSchema = z.object({
   end_time:    z.string().regex(TIME_RE),
 })
 
-async function getClinicId(supabase: Awaited<ReturnType<typeof createClient>>) {
+async function getClinicContext(supabase: Awaited<ReturnType<typeof createClient>>) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Unauthorized')
-  const { data } = await supabase.from('profiles').select('clinic_id').eq('id', user.id).single()
-  if (!data?.clinic_id) throw new Error('No clinic')
-  return data.clinic_id as string
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('clinic_id, clinics(slug)')
+    .eq('id', user.id)
+    .single()
+  if (!profile?.clinic_id) throw new Error('No clinic')
+  return {
+    clinicId:   profile.clinic_id as string,
+    clinicSlug: (profile.clinics as { slug: string } | null)?.slug ?? null,
+  }
 }
 
 async function assertDoctorOwnership(
@@ -27,10 +36,24 @@ async function assertDoctorOwnership(
   doctorId: string,
 ) {
   if (!UUID_RE.test(doctorId)) throw new Error('Invalid doctor id')
-  const clinicId = await getClinicId(supabase)
+  const { clinicId, clinicSlug } = await getClinicContext(supabase)
   const { data: doctor } = await supabase
     .from('doctors').select('id').eq('id', doctorId).eq('clinic_id', clinicId).single()
   if (!doctor) throw new Error('Doctor not found')
+  return { clinicId, clinicSlug }
+}
+
+// Bust both Next.js RSC cache for known affected paths AND the Upstash booking
+// cache (services/doctors metadata) so the public booking page also reloads
+// from DB on its next request.
+async function bustSlotCaches(clinicSlug: string | null) {
+  revalidatePath('/admin/schedules')
+  revalidatePath('/admin/agenda')
+  revalidatePath('/admin/appointments')
+  if (clinicSlug) {
+    revalidatePath(`/${clinicSlug}`)
+    await invalidateBookingCache(clinicSlug)
+  }
 }
 
 // ─── Weekly schedules ────────────────────────────────────────────────────────
@@ -40,7 +63,7 @@ export async function createSchedule(formData: FormData) {
   if (!parsed.success) return { error: parsed.error.flatten().fieldErrors }
 
   const supabase = await createClient()
-  const clinicId = await getClinicId(supabase)
+  const { clinicId, clinicSlug } = await getClinicContext(supabase)
 
   const { data: doctor } = await supabase
     .from('doctors').select('id').eq('id', parsed.data.doctor_id).eq('clinic_id', clinicId).single()
@@ -59,120 +82,130 @@ export async function createSchedule(formData: FormData) {
     return { error: 'Error al guardar el horario.' }
   }
 
-  revalidatePath('/admin/schedules')
+  await bustSlotCaches(clinicSlug)
   return { success: true }
 }
 
 export async function deleteSchedule(id: string) {
   if (!UUID_RE.test(id)) return
   const supabase = await createClient()
-  await getClinicId(supabase) // auth check — RLS enforces clinic ownership
+  const { clinicSlug } = await getClinicContext(supabase)
 
   await supabase.from('schedules').delete().eq('id', id)
 
-  revalidatePath('/admin/schedules')
+  await bustSlotCaches(clinicSlug)
 }
 
 export async function toggleSchedule(id: string, isActive: boolean) {
   if (!UUID_RE.test(id)) return
   const supabase = await createClient()
-  await getClinicId(supabase) // auth check
+  const { clinicSlug } = await getClinicContext(supabase)
   await supabase.from('schedules').update({ is_active: isActive }).eq('id', id)
-  revalidatePath('/admin/schedules')
+  await bustSlotCaches(clinicSlug)
 }
 
 // ─── Schedule exceptions ─────────────────────────────────────────────────────
+// New semantic: each row is a "block" (subtraction from availability).
+//   kind='full-day' → entire date is unavailable
+//   kind='partial'  → only the [start, end) range is unavailable
+export type ExceptionInput =
+  | {
+      doctor_id:      string
+      exception_date: string
+      kind:           'full-day'
+    }
+  | {
+      doctor_id:      string
+      exception_date: string
+      kind:           'partial'
+      start_time:     string
+      end_time:       string
+    }
+
 const ExceptionSchema = z.object({
   doctor_id:      z.string().uuid(),
   exception_date: z.string().regex(DATE_RE),
-  is_working:     z.boolean(),
-  start_time:     z.string().regex(TIME_RE).optional().nullable(),
-  end_time:       z.string().regex(TIME_RE).optional().nullable(),
-}).superRefine((data, ctx) => {
-  if (data.is_working) {
-    if (!data.start_time || !data.end_time) {
-      ctx.addIssue({ code: 'custom', message: 'Si trabaja, indica las horas.' })
+  kind:           z.enum(['full-day', 'partial']),
+  start_time:     z.string().regex(TIME_RE).optional(),
+  end_time:       z.string().regex(TIME_RE).optional(),
+}).superRefine((d, ctx) => {
+  if (d.kind === 'partial') {
+    if (!d.start_time || !d.end_time) {
+      ctx.addIssue({ code: 'custom', message: 'Falta la franja horaria del bloqueo.', path: ['start_time'] })
       return
     }
-    if (data.start_time >= data.end_time) {
-      ctx.addIssue({ code: 'custom', message: 'La hora de inicio debe ser menor que la de fin.' })
+    if (d.start_time >= d.end_time) {
+      ctx.addIssue({
+        code:    'custom',
+        message: 'La hora de inicio debe ser menor que la de fin.',
+        path:    ['end_time'],
+      })
     }
   }
 })
 
-export type ExceptionInput = z.infer<typeof ExceptionSchema>
+function todayLocalISO(): string {
+  const now = new Date()
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('-')
+}
 
-export async function upsertScheduleException(input: ExceptionInput) {
+export async function createScheduleException(input: ExceptionInput) {
   const parsed = ExceptionSchema.safeParse(input)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Datos inválidos.' }
   }
 
   const supabase = await createClient()
-  await assertDoctorOwnership(supabase, parsed.data.doctor_id)
+  const { clinicSlug } = await assertDoctorOwnership(supabase, parsed.data.doctor_id)
 
-  // Don't allow exceptions for past dates
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const targetDate = new Date(parsed.data.exception_date + 'T00:00:00')
-  if (targetDate < today) {
+  if (parsed.data.exception_date < todayLocalISO()) {
     return { error: 'No puedes añadir excepciones para fechas pasadas.' }
   }
 
-  const row = {
-    doctor_id:      parsed.data.doctor_id,
-    exception_date: parsed.data.exception_date,
-    is_working:     parsed.data.is_working,
-    start_time:     parsed.data.is_working ? (parsed.data.start_time! + ':00') : null,
-    end_time:       parsed.data.is_working ? (parsed.data.end_time!   + ':00') : null,
-  }
+  const row: TablesInsert<'doctor_schedule_exceptions'> =
+    parsed.data.kind === 'full-day'
+      ? {
+          doctor_id:      parsed.data.doctor_id,
+          exception_date: parsed.data.exception_date,
+          is_working:     false,
+          start_time:     null,
+          end_time:       null,
+        }
+      : {
+          doctor_id:      parsed.data.doctor_id,
+          exception_date: parsed.data.exception_date,
+          is_working:     false,
+          // superRefine guarantees both are present when kind === 'partial'
+          start_time:     parsed.data.start_time! + ':00',
+          end_time:       parsed.data.end_time!   + ':00',
+        }
 
-  const { error } = await supabase
-    .from('doctor_schedule_exceptions')
-    .upsert(row, { onConflict: 'doctor_id,exception_date' })
+  const { error } = await supabase.from('doctor_schedule_exceptions').insert(row)
 
   if (error) {
-    console.error('[upsertScheduleException] DB error:', error)
+    // Unique index on (doctor, date, is_working, COALESCE start, COALESCE end)
+    // prevents identical duplicates — surface a friendly message.
+    if (error.code === '23505') {
+      return { error: 'Ya existe una excepción idéntica para esa fecha y rango.' }
+    }
+    console.error('[createScheduleException] DB error:', error)
     return { error: 'Error al guardar la excepción.' }
   }
 
-  revalidatePath('/admin/schedules')
-  revalidatePath('/admin/agenda')
-  return { success: true }
-}
-
-export async function toggleExceptionWorking(id: string, isWorking: boolean) {
-  if (!UUID_RE.test(id)) return { error: 'ID inválido.' }
-  const supabase = await createClient()
-  await getClinicId(supabase) // RLS enforces clinic ownership via the policy
-
-  // When flipping to non-working, clear the hours to keep the CHECK constraint happy.
-  const update = isWorking
-    ? { is_working: true }
-    : { is_working: false, start_time: null, end_time: null }
-
-  const { error } = await supabase
-    .from('doctor_schedule_exceptions')
-    .update(update)
-    .eq('id', id)
-
-  if (error) {
-    console.error('[toggleExceptionWorking] DB error:', error)
-    return { error: 'Error al actualizar.' }
-  }
-
-  revalidatePath('/admin/schedules')
-  revalidatePath('/admin/agenda')
+  await bustSlotCaches(clinicSlug)
   return { success: true }
 }
 
 export async function deleteScheduleException(id: string) {
   if (!UUID_RE.test(id)) return
   const supabase = await createClient()
-  await getClinicId(supabase)
+  const { clinicSlug } = await getClinicContext(supabase)
 
   await supabase.from('doctor_schedule_exceptions').delete().eq('id', id)
 
-  revalidatePath('/admin/schedules')
-  revalidatePath('/admin/agenda')
+  await bustSlotCaches(clinicSlug)
 }
