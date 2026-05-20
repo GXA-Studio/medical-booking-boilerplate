@@ -2,7 +2,7 @@
 import * as React from 'react'
 
 const TOAST_LIMIT = 3
-const TOAST_REMOVE_DELAY = 4000
+const DEFAULT_TOAST_DURATION = 3500
 
 type ToastVariant = 'default' | 'destructive' | 'success'
 
@@ -33,19 +33,24 @@ function toast(props: Omit<Toast, 'id'>) {
     dispatch(memoryState.map((item) => (item.id === id ? { ...item, ...t } : item)))
   const dismiss = () => dispatch(memoryState.filter((item) => item.id !== id))
 
+  const duration = props.duration ?? DEFAULT_TOAST_DURATION
+
   dispatch([
     {
       ...props,
       id,
       open: true,
       onOpenChange: (open: boolean) => {
-        if (!open) {
-          setTimeout(dismiss, TOAST_REMOVE_DELAY)
-        }
+        if (!open) dismiss()
       },
     },
     ...memoryState,
   ].slice(0, TOAST_LIMIT))
+
+  // Auto-dismiss after the configured duration
+  if (duration > 0) {
+    setTimeout(dismiss, duration)
+  }
 
   return { id, dismiss, update }
 }

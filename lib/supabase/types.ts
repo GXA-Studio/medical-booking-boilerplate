@@ -165,6 +165,44 @@ export type Database = {
           },
         ]
       }
+      doctor_schedule_exceptions: {
+        Row: {
+          created_at: string
+          doctor_id: string
+          end_time: string | null
+          exception_date: string
+          id: string
+          is_working: boolean
+          start_time: string | null
+        }
+        Insert: {
+          created_at?: string
+          doctor_id: string
+          end_time?: string | null
+          exception_date: string
+          id?: string
+          is_working?: boolean
+          start_time?: string | null
+        }
+        Update: {
+          created_at?: string
+          doctor_id?: string
+          end_time?: string | null
+          exception_date?: string
+          id?: string
+          is_working?: boolean
+          start_time?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "doctor_schedule_exceptions_doctor_id_fkey"
+            columns: ["doctor_id"]
+            isOneToOne: false
+            referencedRelation: "doctors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       doctor_services: {
         Row: {
           doctor_id: string
@@ -386,6 +424,7 @@ export type Database = {
         Returns: {
           cancellation_token: string
           clinic_id: string
+          color: string | null
           created_at: string
           doctor_id: string
           ends_at: string
@@ -419,6 +458,7 @@ export type Database = {
         Returns: {
           cancellation_token: string
           clinic_id: string
+          color: string | null
           created_at: string
           doctor_id: string
           ends_at: string
@@ -445,36 +485,7 @@ export type Database = {
         Returns: {
           cancellation_token: string
           clinic_id: string
-          created_at: string
-          doctor_id: string
-          ends_at: string
-          id: string
-          notes: string | null
-          otp_code_hash: string | null
-          otp_expires_at: string | null
-          patient_name: string
-          patient_phone: string
-          reminder_sent: boolean
-          service_id: string
-          starts_at: string
-          status: Database["public"]["Enums"]["appointment_status"]
-        }
-        SetofOptions: {
-          from: "*"
-          to: "appointments"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
-      reschedule_appointment: {
-        Args: {
-          p_cancellation_token: string
-          p_new_doctor_id:      string
-          p_new_starts_at:      string
-        }
-        Returns: {
-          cancellation_token: string
-          clinic_id: string
+          color: string | null
           created_at: string
           doctor_id: string
           ends_at: string
@@ -517,8 +528,43 @@ export type Database = {
           slot_start: string
         }[]
       }
+      reschedule_appointment: {
+        Args: {
+          p_cancellation_token: string
+          p_new_doctor_id: string
+          p_new_starts_at: string
+        }
+        Returns: {
+          cancellation_token: string
+          clinic_id: string
+          color: string | null
+          created_at: string
+          doctor_id: string
+          ends_at: string
+          id: string
+          notes: string | null
+          otp_code_hash: string | null
+          otp_expires_at: string | null
+          patient_name: string
+          patient_phone: string
+          reminder_sent: boolean
+          service_id: string
+          starts_at: string
+          status: Database["public"]["Enums"]["appointment_status"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "appointments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
+      // Manual override: DB still has the 'pending' enum value for backwards
+      // compatibility with old RPC signatures, but a CHECK constraint on
+      // appointments.status physically blocks inserting it. Keeping the TS
+      // union to two states avoids dead branches in admin UI code.
       appointment_status: "confirmed" | "cancelled"
     }
     CompositeTypes: {
@@ -648,6 +694,7 @@ export type CompositeTypes<
 export type Service = Tables<'services'>
 export type Doctor  = Tables<'doctors'>
 export type Clinic  = Tables<'clinics'>
+export type DoctorScheduleException = Tables<'doctor_schedule_exceptions'>
 
 export const Constants = {
   public: {

@@ -44,6 +44,7 @@ export async function createService(formData: FormData) {
   }
 
   revalidatePath('/admin/services')
+  revalidatePath('/admin/agenda')
   if (clinicSlug) await invalidateBookingCache(clinicSlug)
   return { success: true }
 }
@@ -65,7 +66,10 @@ export async function updateService(id: string, formData: FormData) {
     return { error: 'Error al guardar el servicio.' }
   }
 
+  // Color inheritance: appointments without an explicit color inherit
+  // services.color → revalidate agenda so the cards repaint instantly.
   revalidatePath('/admin/services')
+  revalidatePath('/admin/agenda')
   if (clinicSlug) await invalidateBookingCache(clinicSlug)
   return { success: true }
 }
@@ -76,5 +80,6 @@ export async function toggleService(id: string, isActive: boolean) {
   const { clinicId, clinicSlug } = await getClinicContext(supabase)
   await supabase.from('services').update({ is_active: isActive }).eq('id', id).eq('clinic_id', clinicId)
   revalidatePath('/admin/services')
+  revalidatePath('/admin/agenda')
   if (clinicSlug) await invalidateBookingCache(clinicSlug)
 }
