@@ -111,18 +111,31 @@ export interface SendCancellationWhatsAppParams {
   clinicName: string
   startsAt: string
   timezone: string
+  /** Doctor's full name — when provided, triggers the empathetic exception-cancel message */
+  doctorName?: string
+  /** Direct link to rebook — shown when doctorName is also provided */
+  rescheduleUrl?: string
 }
 
 export async function sendCancellationWhatsApp({
-  to, patientName, clinicName, startsAt, timezone,
+  to, patientName, clinicName, startsAt, timezone, doctorName, rescheduleUrl,
 }: SendCancellationWhatsAppParams): Promise<void> {
   const dateStr = formatSmsDateTime(startsAt, timezone)
+
+  const body = doctorName
+    ? `Hola ${patientName},\n\n` +
+      `Lamentamos comunicarte que el/la Dr./Dra. ${doctorName} ha tenido un imprevisto y no podrá atenderte ` +
+      `el ${dateStr}. Tu cita en ${clinicName} ha sido cancelada.\n\n` +
+      `Para elegir una nueva fecha y hora con total comodidad, haz clic aquí:\n` +
+      `🔗 ${rescheduleUrl ?? clinicName}\n\n` +
+      `Disculpa las molestias. Estamos a tu disposición para cualquier consulta.`
+    : `Hola ${patientName}, tu cita en ${clinicName} para el día ${dateStr} ha sido cancelada correctamente. ` +
+      `Esperamos verte pronto.`
+
   await getClient().messages.create({
     to:   `whatsapp:${to}`,
     from: WHATSAPP_FROM,
-    body:
-      `Hola ${patientName}, tu cita en ${clinicName} para el día ${dateStr} ha sido cancelada correctamente. ` +
-      `Esperamos verte pronto.`,
+    body,
   })
 }
 

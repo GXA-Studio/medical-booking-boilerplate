@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { invalidateBookingCache } from '@/lib/cache'
 import { sendCancellationWhatsApp } from '@/lib/twilio/client'
+import { getBaseUrl } from '@/lib/utils'
 import type { TablesInsert } from '@/lib/supabase/types'
 import { z } from 'zod'
 
@@ -311,12 +312,14 @@ async function cancelOverlappingAppointments(args: {
 
   const { data: doctorRow } = await supabase
     .from('doctors')
-    .select('clinic_id, clinics(name, timezone)')
+    .select('name, clinic_id, clinics(slug, name, timezone)')
     .eq('id', args.doctorId)
     .single()
-  const clinic = doctorRow?.clinics as { name: string; timezone: string } | null
+  const clinic     = doctorRow?.clinics as { slug: string; name: string; timezone: string } | null
   const timezone   = clinic?.timezone ?? 'UTC'
   const clinicName = clinic?.name     ?? 'la clínica'
+  const clinicSlug = clinic?.slug     ?? null
+  const doctorName = (doctorRow as { name?: string } | null)?.name ?? null
 
   let windowStartUtc: Date
   let windowEndUtc:   Date
@@ -350,6 +353,8 @@ async function cancelOverlappingAppointments(args: {
   // Defer Twilio so the action returns immediately. Promise.allSettled keeps
   // one failed send from blocking the others.
   after(async () => {
+    const baseUrl      = getBaseUrl()
+    const rescheduleUrl = clinicSlug ? `${baseUrl}/${clinicSlug}` : undefined
     const results = await Promise.allSettled(
       rows.map((r) =>
         sendCancellationWhatsApp({
@@ -358,6 +363,8 @@ async function cancelOverlappingAppointments(args: {
           clinicName,
           startsAt:    r.starts_at as string,
           timezone,
+          doctorName:   doctorName ?? undefined,
+          rescheduleUrl,
         })
       )
     )
