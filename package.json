@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:types": "npx supabase gen types typescript --project-id $SUPABASE_PROJECT_ID --schema public > lib/supabase/types.ts"
+    "db:types": "npx supabase gen types typescript --project-id $SUPABASE_PROJECT_ID --schema public > /tmp/mbb-types.ts && mv /tmp/mbb-types.ts lib/supabase/types.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
