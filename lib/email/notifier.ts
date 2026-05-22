@@ -63,12 +63,36 @@ export async function sendLeadNotificationEmail(payload: LeadNotificationPayload
     `<p style="margin-top:20px;font-size:12px;color:#999;">Captura automática desde la landing del medical-booking-boilerplate.</p>` +
     `</div>`
 
-  await transporter.sendMail({
-    from: `"Medical Booking — Leads" <${process.env.GMAIL_APP_USER}>`,
-    to: NOTIFICATION_INBOX,
-    replyTo: email,
-    subject,
-    text,
-    html,
-  })
+  const confirmationHtml =
+    `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;color:#111;">` +
+    `<h2 style="margin:0 0 16px;font-size:20px;">Hemos recibido tu consulta</h2>` +
+    `<p style="font-size:15px;line-height:1.6;margin:0 0 12px;">Hola ${name},</p>` +
+    `<p style="font-size:15px;line-height:1.6;margin:0 0 12px;">Gracias por tu interés. Nos pondremos en contacto contigo en menos de 24 horas laborables para agendar tu consulta inicial gratuita.</p>` +
+    `<p style="font-size:15px;line-height:1.6;margin:0 0 24px;">Mientras tanto, puedes explorar el sistema en funcionamiento:</p>` +
+    `<a href="https://medical-booking-boilerplate.vercel.app/#demo" style="display:inline-block;background:#111;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">Ver demo</a>` +
+    `<p style="margin-top:32px;font-size:13px;color:#666;">Un saludo,<br/>El equipo de GXA Studio</p>` +
+    `</div>`
+
+  await Promise.all([
+    transporter.sendMail({
+      from: `"GXA Studio" <${process.env.GMAIL_APP_USER}>`,
+      to: NOTIFICATION_INBOX,
+      replyTo: email,
+      subject,
+      text,
+      html,
+    }),
+    transporter.sendMail({
+      from: `"GXA Studio" <${process.env.GMAIL_APP_USER}>`,
+      to: email,
+      replyTo: NOTIFICATION_INBOX,
+      subject: 'Hemos recibido tu consulta — GXA Studio',
+      text:
+        `Hola ${name},\n\n` +
+        `Gracias por tu interés. Nos pondremos en contacto contigo en menos de 24 horas laborables para agendar tu consulta inicial gratuita.\n\n` +
+        `Mientras tanto, puedes explorar el sistema en:\nhttps://medical-booking-boilerplate.vercel.app/#demo\n\n` +
+        `Un saludo,\nEl equipo de GXA Studio`,
+      html: confirmationHtml,
+    }),
+  ])
 }
