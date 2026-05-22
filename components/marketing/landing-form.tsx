@@ -18,7 +18,8 @@ export default function LandingForm() {
     setStatus('loading')
     setErrorMessage(null)
 
-    const formData = new FormData(e.currentTarget)
+    const form = e.currentTarget
+    const formData = new FormData(form)
     const payload = {
       name: String(formData.get('name') ?? '').trim(),
       email: String(formData.get('email') ?? '').trim(),
@@ -47,7 +48,7 @@ export default function LandingForm() {
       }
 
       setStatus('success')
-      e.currentTarget.reset()
+      form.reset()
     } catch {
       setErrorMessage('No hemos podido enviar el formulario. ¿Quizá un problema de conexión?')
       setStatus('error')
@@ -60,7 +61,7 @@ export default function LandingForm() {
         <CheckCircle2 className="h-12 w-12 text-primary mx-auto mb-4" />
         <h3 className="text-xl font-semibold mb-2">¡Recibido!</h3>
         <p className="text-muted-foreground">
-          Te responderemos en menos de 24 horas laborables con un hueco para la demo.
+          Nos ponemos en contacto en menos de 24 horas para agendar tu consulta gratuita.
         </p>
       </div>
     )
@@ -108,7 +109,7 @@ export default function LandingForm() {
             Enviando…
           </>
         ) : (
-          'Pedir demo'
+          'Solicitar consulta gratuita'
         )}
       </Button>
 

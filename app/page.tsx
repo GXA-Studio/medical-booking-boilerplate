@@ -296,12 +296,15 @@ export default function Landing() {
       <section id="contacto" className="container py-20 md:py-28">
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-12">
+            <div className="inline-block rounded-full border bg-muted/50 px-3 py-1 text-xs font-medium mb-6">
+              Consulta inicial gratuita
+            </div>
             <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">
               ¿Hablamos 15 minutos?
             </h2>
             <p className="text-muted-foreground text-lg leading-relaxed">
-              Cuéntanos cómo trabaja tu clínica y te enseñamos en vivo cómo encajaría el sistema.
-              Sin compromiso.
+              Sin coste ni compromiso. Cuéntanos cómo trabaja tu clínica y te enseñamos
+              en vivo cómo encajaría el sistema en tu día a día.
             </p>
           </div>
           <LandingForm />
