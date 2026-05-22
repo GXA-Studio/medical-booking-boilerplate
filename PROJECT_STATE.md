@@ -1,6 +1,6 @@
 # PROJECT STATE — Medical Booking Boilerplate
 > **Single source of truth** for all future sessions.  
-> Last updated: **2026-05-20** — Bloqueos horarios parciales, HTTP no-store en /api/slots y herencia cromática reactiva.
+> Last updated: **2026-05-20** — Renderizado visual de excepciones en agenda y cancelación automática de citas en conflicto.
 
 ---
 
@@ -201,7 +201,8 @@ La pantalla `/admin/schedules` permite configurar el horario semanal recurrente 
 | Crear turno semanal | `createSchedule(formData)` |
 | Activar/desactivar turno | `toggleSchedule(id, isActive)` |
 | Eliminar turno | `deleteSchedule(id)` |
-| Crear excepción (full-day o partial) | `createScheduleException({ doctor_id, exception_date, kind: 'full-day' \| 'partial', start_time?, end_time? })` |
+| Verificar citas en conflicto | `checkExceptionConflicts(input)` → `{ conflicts, totalCount }` |
+| Crear excepción (full-day o partial) | `createScheduleException(input, { cancelOverlapping?: boolean })` |
 | Eliminar excepción | `deleteScheduleException(id)` |
 
 Todas las server actions invocan `bustSlotCaches(clinicSlug)` que: `revalidatePath('/admin/{schedules,agenda,appointments}')`, `revalidatePath('/{clinicSlug}')` y `invalidateBookingCache(clinicSlug)` (Upstash). Esto garantiza que tanto el calendario público como la agenda admin se repinten al instante tras un bloqueo.
@@ -216,6 +217,54 @@ Todas las server actions invocan `bustSlotCaches(clinicSlug)` que: `revalidatePa
 - No se permiten excepciones para fechas pasadas (validado en la server action).
 
 **Integración en las RPCs**: ver §8.4 — `get_available_slots` y `get_slots_for_service` aplican: (1) si existe **un solo** row "Día Completo Libre" → 0 slots; (2) si existen rows `is_working=true` → usarlas como ventanas en lugar del horario semanal (legacy); (3) los slots generados se filtran excluyendo cualquiera cuyo `[start, end)` solape con un bloqueo parcial.
+
+### Renderizado visual de excepciones en la agenda
+
+`/admin/agenda` (`daily-resource-grid.tsx`) pinta las excepciones del día como overlays rallados sobre la columna del médico afectado.
+
+**Fetching**: el Server Component de la agenda (`agenda/page.tsx`) consulta `doctor_schedule_exceptions` en paralelo con los demás recursos (un `Promise.all` con schedules, appointments, services, exceptions) filtrando por `exception_date = date` y los doctores activos.
+
+**Estilo de stripes** (definido inline en `daily-resource-grid.tsx`, no en Tailwind para evitar purge):
+
+```ts
+const FULL_DAY_BG = 'rgba(244, 63, 94, 0.45)'   // rose-500 @ 45%
+const PARTIAL_BG  = 'rgba(245, 158, 11, 0.45)'  // amber-500 @ 45%
+const stripedBackground = (base) => ({
+  backgroundColor: base,
+  backgroundImage: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.45), rgba(255,255,255,0.45) 8px, transparent 8px, transparent 16px)',
+})
+```
+
+**Z-index layering** (de abajo a arriba):
+1. Background cells (z-0)
+2. Overlays de excepciones (`z-[5]`, `pointer-events-none`) — los clicks pasan a través
+3. Tarjetas de cita (`z-10`) — siguen siendo clicables aun encima de un bloqueo
+
+**Tipos de overlay**:
+- **Día completo libre**: cuadro rojo rallado cubriendo `totalGridHeight - 4`, con chip rotado `-15deg` con texto "Día No Disponible".
+- **Bloqueo parcial**: cuadro ámbar rallado posicionado por `start_time`/`end_time`, etiquetado "Bloqueo Horario" + rango monospace.
+
+**Click-prevention**: `isSlotWorking(slotIndex, blocks, exceptions)` ahora recibe las excepciones del médico. Si `fullDay=true` devuelve `false` para todo el día. Si hay `partials`, verifica overlap entre `[slotStart, slotEnd)` y `[block.start, block.end)`. Resultado: las celdas dentro de un bloqueo **no son clicables** — el admin no puede crear citas sobre franjas bloqueadas.
+
+### Flujo de conflictos al crear excepciones
+
+Cuando el admin guarda una excepción que solapa con citas confirmadas, el sistema interrumpe con un `AlertDialog` (shadcn/ui) **antes** de persistir.
+
+**Pipeline** (`schedule-editor.tsx` + `actions.ts`):
+1. Submit en el dialog "Nueva excepción" → `handleSaveException` construye el `ExceptionInput`.
+2. Llamada a **`checkExceptionConflicts(input)`** — devuelve `{ conflicts: ConflictAppointment[], totalCount }`.
+   - Calcula la ventana UTC con `fromZonedTime(date-fns-tz)` (DST-safe).
+   - Para `full-day`: ventana = `[date 00:00:00, date 23:59:59.999]` clinic-local.
+   - Para `partial`: ventana = `[date + start_time, date + end_time]` clinic-local.
+   - Predicate PostgREST: `starts_at < window_end AND ends_at > window_start`.
+3. Si `totalCount === 0` → `persistException` directamente.
+4. Si `totalCount > 0` → abre `AlertDialog` con título "Atención: Hay citas programadas", lista de pacientes afectados (nombre/teléfono/hora) en scroll, botones "Cancelar" / "Sí, cancelar citas y bloquear".
+5. Al confirmar → `createScheduleException(input, { cancelOverlapping: true })`.
+
+**Cancelación automática + Twilio** (`cancelOverlappingAppointments`):
+- Bulk UPDATE `status='cancelled'` vía `createServiceClient()` (bypassa RLS) con el mismo predicate de overlap.
+- WhatsApp diferido con `after()` de Next 15 + `Promise.allSettled` — el response vuelve al instante; fallos individuales se loguean sin abortar el resto. La función Vercel sigue viva hasta que todos los envíos resuelven.
+- El toast final del admin incluye `${cancelledCount} cita(s) cancelada(s) y avisadas por WhatsApp` cuando aplica.
 
 ---
 
@@ -483,4 +532,5 @@ new Date().toISOString().slice(0, 10)
 | `1c88e21` | feat(admin): add chromatic color system for agenda appointment cards |
 | `4e84b20` | fix(admin): repair color swatches purged by Tailwind in production |
 | `806256b` | feat: instant color updates, auto-dismiss toasts, and optimistic doctor schedule exceptions |
-| `(HEAD)` | feat: partial time blocks, multiple exceptions per day, and no-store slots cache |
+| `38097a7` | feat: partial time blocks, multiple exceptions per day, and no-store slots cache |
+| `(HEAD)` | feat: visual schedule exceptions and automated conflict resolution |
