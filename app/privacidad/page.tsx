@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { getClinicLegalData } from '@/lib/clinics/legal'
 
 export const metadata: Metadata = {
   title: 'Política de Privacidad',
@@ -7,11 +8,26 @@ export const metadata: Metadata = {
 }
 
 const CONTACT_EMAIL = 'studiogxa@gmail.com'
-const CLINIC_NAME   = 'La Clínica contratante del servicio'
 const GXA_ROLE      = 'GXA Studio (Encargado del Tratamiento · Proveedor SaaS)'
 const DPO_EMAIL     = CONTACT_EMAIL
 
-export default function PrivacidadPage() {
+const FALLBACK_CLINIC_NAME = 'La Clínica contratante del servicio'
+const FALLBACK_CIF_TEXT    = 'Facilitado en el contrato de prestación de servicios'
+const FALLBACK_ADDRESS     = 'Indicado en el contrato de prestación de servicios'
+
+interface PageProps {
+  searchParams: Promise<{ slug?: string }>
+}
+
+export default async function PrivacidadPage({ searchParams }: PageProps) {
+  const { slug } = await searchParams
+  const clinic = await getClinicLegalData(slug)
+
+  // White-label values: fall back to placeholders when no clinic context is available
+  const clinicName    = clinic?.legal_name || clinic?.name || FALLBACK_CLINIC_NAME
+  const clinicCif     = clinic?.cif        || FALLBACK_CIF_TEXT
+  const clinicAddress = clinic?.address    || FALLBACK_ADDRESS
+
   return (
     <div className="min-h-screen bg-slate-50 py-12 px-4">
       <div className="max-w-3xl mx-auto">
@@ -47,9 +63,9 @@ export default function PrivacidadPage() {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Responsable del tratamiento (la clínica)</p>
                 <Table rows={[
-                  ['Denominación',       CLINIC_NAME],
-                  ['NIF / CIF',          'Facilitado en el contrato de prestación de servicios'],
-                  ['Domicilio social',   'Indicado en el contrato de prestación de servicios'],
+                  ['Denominación',       clinicName],
+                  ['NIF / CIF',          clinicCif],
+                  ['Domicilio social',   clinicAddress],
                   ['Correo de contacto', CONTACT_EMAIL],
                   ['DPD / Contacto RGPD', DPO_EMAIL],
                 ]} />
@@ -214,7 +230,7 @@ export default function PrivacidadPage() {
         {/* Footer */}
         <div className="mt-12 pt-8 border-t border-slate-200 text-center">
           <p className="text-xs text-slate-400">
-            {CLINIC_NAME} · Plataforma gestionada por {GXA_ROLE}
+            {clinicName} · Plataforma gestionada por {GXA_ROLE}
           </p>
           <p className="text-xs text-slate-400 mt-1">
             Contacto DPD:{' '}

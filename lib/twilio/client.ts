@@ -187,3 +187,4 @@ export async function sendWhatsAppReminder({
       `⚙️ Gestiona tu cita (modificar o cancelar): ${baseUrl}/manage/${cancellationToken}`,
   })
 }
+

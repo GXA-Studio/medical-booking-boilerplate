@@ -27,3 +27,12 @@ export const slotsLimiter = new Ratelimit({
   analytics: true,
   prefix: '@mbb/slots:ip',
 })
+
+// Marketing landing form: max 5 lead submissions per IP per hour.
+// Generous enough for legitimate retries; tight enough to deter scripted spam.
+export const leadsIpLimiter = new Ratelimit({
+  redis: getRedis(),
+  limiter: Ratelimit.slidingWindow(5, '1 h'),
+  analytics: true,
+  prefix: '@mbb/leads:ip',
+})
