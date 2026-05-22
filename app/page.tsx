@@ -137,7 +137,7 @@ export default function Landing() {
             </a>
           </Button>
           <Button asChild size="lg" variant="outline" className="text-base h-12 px-6">
-            <a href="#contacto">Hablamos en 15 minutos</a>
+            <a href="#contacto">Solicitar consulta gratuita</a>
           </Button>
         </div>
         <p className="text-xs text-muted-foreground mt-6">
@@ -204,7 +204,7 @@ export default function Landing() {
       <section id="features" className="container py-20 md:py-28">
         <div className="max-w-2xl mx-auto text-center mb-16">
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">
-            Lo que tienes que ofrecer un Calendly no ofrece
+            Lo que ninguna herramienta genérica ofrece
           </h2>
           <p className="text-muted-foreground text-lg leading-relaxed">
             Construido específicamente para clínicas. Cada decisión técnica resuelve un
@@ -300,7 +300,7 @@ export default function Landing() {
               Consulta inicial gratuita
             </div>
             <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-4">
-              ¿Hablamos 15 minutos?
+              ¿Te lo enseñamos en vivo?
             </h2>
             <p className="text-muted-foreground text-lg leading-relaxed">
               Sin coste ni compromiso. Cuéntanos cómo trabaja tu clínica y te enseñamos
