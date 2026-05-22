@@ -110,11 +110,8 @@ export default function Landing() {
             <a href="#pricing" className="hidden md:inline-block text-muted-foreground hover:text-foreground">
               Precios
             </a>
-            <Button asChild size="sm" variant="ghost">
-              <Link href={DEMO_PATH}>Demo paciente</Link>
-            </Button>
             <Button asChild size="sm" variant="outline">
-              <Link href={ADMIN_PATH}>Panel demo</Link>
+              <a href="#demo">Probar el demo</a>
             </Button>
           </nav>
         </div>
@@ -135,9 +132,9 @@ export default function Landing() {
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <Button asChild size="lg" className="text-base h-12 px-6">
-            <Link href={DEMO_PATH}>
+            <a href="#demo">
               Probar el demo <ArrowRight className="ml-2 h-4 w-4" />
-            </Link>
+            </a>
           </Button>
           <Button asChild size="lg" variant="outline" className="text-base h-12 px-6">
             <a href="#contacto">Hablamos en 15 minutos</a>
@@ -151,7 +148,7 @@ export default function Landing() {
       <Separator />
 
       {/* ── DEMO DOBLE ────────────────────────────────────────────── */}
-      <section className="container py-16 md:py-20">
+      <section id="demo" className="container py-16 md:py-20">
         <div className="max-w-2xl mx-auto text-center mb-12">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight mb-3">
             Prueba el sistema completo
