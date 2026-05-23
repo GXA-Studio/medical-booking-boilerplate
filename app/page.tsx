@@ -178,17 +178,9 @@ export default function Landing() {
               Panel de gestión
             </span>
             <h3 className="font-bold text-lg mb-2">Como lo ves tú</h3>
-            <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-              Agenda, citas, médicos y horarios en tiempo real. Entra con las credenciales del demo:
+            <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
+              Agenda, citas, médicos y horarios en tiempo real. Accede al panel de administración sin registro.
             </p>
-            <div className="bg-muted rounded-md px-4 py-3 mb-6 font-mono text-sm space-y-1">
-              <div>
-                <span className="text-muted-foreground">email: </span>admin@demo.com
-              </div>
-              <div>
-                <span className="text-muted-foreground">contraseña: </span>demo1234
-              </div>
-            </div>
             <Button asChild variant="outline" className="w-full">
               <Link href={ADMIN_PATH}>
                 Entrar al panel <ArrowRight className="ml-2 h-4 w-4" />
