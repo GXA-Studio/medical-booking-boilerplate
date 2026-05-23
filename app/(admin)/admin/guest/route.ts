@@ -1,23 +1,23 @@
-import { NextResponse } from 'next/server'
+import { type NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { GUEST_COOKIE } from '@/lib/admin/guest-guard'
 
 const DEMO_EMAIL    = 'admin@demo.com'
 const DEMO_PASSWORD = 'demo1234'
 
-export async function GET() {
-  const jar = await cookies()
+export async function GET(request: NextRequest) {
+  const redirectUrl = new URL('/admin', request.nextUrl.origin)
+  const response    = NextResponse.redirect(redirectUrl)
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll: () => jar.getAll(),
+        getAll: () => request.cookies.getAll(),
         setAll: (cookiesToSet) => {
           cookiesToSet.forEach(({ name, value, options }) =>
-            jar.set(name, value, options)
+            response.cookies.set(name, value, options)
           )
         },
       },
@@ -26,12 +26,12 @@ export async function GET() {
 
   await supabase.auth.signInWithPassword({ email: DEMO_EMAIL, password: DEMO_PASSWORD })
 
-  jar.set(GUEST_COOKIE, '1', {
+  response.cookies.set(GUEST_COOKIE, '1', {
     path:     '/admin',
     httpOnly: false,
     sameSite: 'lax',
-    maxAge:   60 * 60 * 2, // 2 h
+    maxAge:   60 * 60 * 2,
   })
 
-  return NextResponse.redirect(new URL('/admin', process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'))
+  return response
 }
