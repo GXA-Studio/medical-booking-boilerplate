@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import { Sidebar } from './sidebar'
+import { GuestModeProvider } from './guest-mode-context'
 import { Menu } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Toaster } from '@/components/ui/toaster'
@@ -9,10 +10,12 @@ import { Toaster } from '@/components/ui/toaster'
 export function AdminShell({
   clinicName,
   userEmail,
+  isGuest = false,
   children,
 }: {
   clinicName: string
   userEmail: string
+  isGuest?: boolean
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -23,6 +26,7 @@ export function AdminShell({
   }, [pathname])
 
   return (
+    <GuestModeProvider isGuest={isGuest}>
     <div className="flex h-screen overflow-hidden bg-slate-50">
       {open && (
         <div
@@ -63,5 +67,6 @@ export function AdminShell({
 
       <Toaster />
     </div>
+    </GuestModeProvider>
   )
 }

@@ -5,6 +5,7 @@ import {
   createScheduleException, deleteScheduleException, checkExceptionConflicts,
   type ExceptionInput, type ConflictAppointment,
 } from '@/app/(admin)/admin/schedules/actions'
+import { useGuestMode } from '@/components/admin/guest-mode-context'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -129,6 +130,7 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
   } | null>(null)
   const [checkingConflicts, setCheckingConflicts] = useState(false)
 
+  const { notifyDemo } = useGuestMode()
   const [pending, start] = useTransition()
   const [optimisticDoctors, dispatchOptimistic] =
     useOptimistic(initialDoctors, applyOptimistic)
@@ -148,7 +150,8 @@ export function ScheduleEditor({ doctors: initialDoctors }: { doctors: DoctorWit
     fd.set('doctor_id', activeDoctorId)
     start(async () => {
       const result = await createSchedule(fd)
-      if (result.error) {
+      if ('demo' in result) { notifyDemo(); setShiftDialogOpen(false); return }
+      if ('error' in result && result.error) {
         const msg = typeof result.error === 'string' ? result.error : 'Verifica los campos.'
         toast({ variant: 'destructive', title: 'Error', description: msg })
         return

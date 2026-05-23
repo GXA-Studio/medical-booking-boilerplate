@@ -2,6 +2,7 @@
 import { useState, useTransition, useOptimistic } from 'react'
 import type { Service } from '@/lib/supabase/types'
 import { createService, updateService, toggleService } from '@/app/(admin)/admin/services/actions'
+import { useGuestMode } from '@/components/admin/guest-mode-context'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
 import { Label }  from '@/components/ui/label'
@@ -38,6 +39,7 @@ function applyOptimistic(state: Service[], action: OptimisticAction): Service[] 
 }
 
 export function ServicesClient({ services: initial }: { services: Service[] }) {
+  const { notifyDemo } = useGuestMode()
   const [open,        setOpen]        = useState(false)
   const [mode,        setMode]        = useState<FormMode>('create')
   const [selected,    setSelected]    = useState<Service | null>(null)
@@ -89,7 +91,8 @@ export function ServicesClient({ services: initial }: { services: Service[] }) {
         ? await createService(fd)
         : await updateService(selected!.id, fd)
 
-      if (result.error) {
+      if ('demo' in result) { notifyDemo(); setOpen(false); return }
+      if ('error' in result && result.error) {
         toast({
           variant: 'destructive',
           title: 'Error',
@@ -109,7 +112,8 @@ export function ServicesClient({ services: initial }: { services: Service[] }) {
   function handleToggle(svc: Service, checked: boolean) {
     startTransition(async () => {
       dispatchOptimistic({ type: 'toggle', id: svc.id, isActive: checked })
-      await toggleService(svc.id, checked)
+      const result = await toggleService(svc.id, checked)
+      if (result && 'demo' in result) notifyDemo()
     })
   }
 

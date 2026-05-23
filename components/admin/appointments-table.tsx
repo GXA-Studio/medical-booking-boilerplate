@@ -2,6 +2,7 @@
 import { useState, useTransition, useRef } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { cancelAppointment } from '@/app/(admin)/admin/appointments/actions'
+import { useGuestMode } from '@/components/admin/guest-mode-context'
 import { Button } from '@/components/ui/button'
 import { Badge }  from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -61,6 +62,7 @@ export function AppointmentsTable({
   appointments: AppointmentRow[]
   timezone: string
 }) {
+  const { notifyDemo } = useGuestMode()
   const router       = useRouter()
   const pathname     = usePathname()
   const searchParams = useSearchParams()
@@ -100,7 +102,8 @@ export function AppointmentsTable({
     start(async () => {
       const result = await cancelAppointment(cancelId)
       setCancelId(null)
-      if (result.error) {
+      if ('demo' in result) { notifyDemo(); return }
+      if ('error' in result && result.error) {
         toast({ variant: 'destructive', title: 'Error', description: result.error })
         return
       }

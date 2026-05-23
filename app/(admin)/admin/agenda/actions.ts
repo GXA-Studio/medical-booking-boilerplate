@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { sendCancellationWhatsApp, sendRescheduleWhatsApp } from '@/lib/twilio/client'
 import { getBaseUrl } from '@/lib/utils'
+import { isGuestMode, DEMO_RESULT } from '@/lib/admin/guest-guard'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -30,7 +31,8 @@ function pickClinic(raw: unknown): ClinicShape {
 // ─── Cancel ───────────────────────────────────────────────────────────────────
 export async function adminCancelAppointment(
   appointmentId: string,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; demo?: boolean }> {
+  if (await isGuestMode()) return { ...DEMO_RESULT, success: true }
   if (!UUID_RE.test(appointmentId)) return { success: false, error: 'ID de cita inválido.' }
 
   const supabase = await createClient()
@@ -80,7 +82,8 @@ export async function adminRescheduleAppointment(
   appointmentId: string,
   newDoctorId:   string,
   newStartsAt:   string,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; demo?: boolean }> {
+  if (await isGuestMode()) return { ...DEMO_RESULT, success: true }
   if (!UUID_RE.test(appointmentId) || !UUID_RE.test(newDoctorId)) {
     return { success: false, error: 'Parámetros inválidos.' }
   }
@@ -146,7 +149,8 @@ const VALID_COLORS = ['blue', 'emerald', 'purple', 'amber', 'rose'] as const
 export async function adminUpdateAppointmentColor(
   appointmentId: string,
   color: string,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; demo?: boolean }> {
+  if (await isGuestMode()) return { ...DEMO_RESULT, success: true }
   if (!UUID_RE.test(appointmentId)) return { success: false, error: 'ID de cita inválido.' }
   if (!(VALID_COLORS as readonly string[]).includes(color)) return { success: false, error: 'Color inválido.' }
 

@@ -1,6 +1,7 @@
 'use client'
 import { useState, useTransition } from 'react'
 import { createDoctor, updateDoctor, toggleDoctor } from '@/app/(admin)/admin/doctors/actions'
+import { useGuestMode } from '@/components/admin/guest-mode-context'
 import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
 import { Label }  from '@/components/ui/label'
@@ -25,6 +26,7 @@ interface DoctorRow {
 interface ServiceOption { id: string; name: string }
 
 export function DoctorsClient({ doctors: initial, services }: { doctors: DoctorRow[]; services: ServiceOption[] }) {
+  const { notifyDemo } = useGuestMode()
   const [doctors,  setDoctors]  = useState(initial)
   const [open,     setOpen]     = useState(false)
   const [mode,     setMode]     = useState<'create' | 'edit'>('create')
@@ -39,7 +41,8 @@ export function DoctorsClient({ doctors: initial, services }: { doctors: DoctorR
     const fd = new FormData(e.currentTarget)
     start(async () => {
       const result = mode === 'create' ? await createDoctor(fd) : await updateDoctor(selected!.id, fd)
-      if (result.error) {
+      if ('demo' in result) { notifyDemo(); setOpen(false); return }
+      if ('error' in result && result.error) {
         toast({ variant: 'destructive', title: 'Error', description: typeof result.error === 'string' ? result.error : 'Verifica los campos.' })
         return
       }
@@ -50,7 +53,8 @@ export function DoctorsClient({ doctors: initial, services }: { doctors: DoctorR
 
   async function handleToggle(d: DoctorRow, checked: boolean) {
     setDoctors((prev) => prev.map((x) => x.id === d.id ? { ...x, is_active: checked } : x))
-    await toggleDoctor(d.id, checked)
+    const result = await toggleDoctor(d.id, checked)
+    if (result && 'demo' in result) notifyDemo()
   }
 
   const selectedServiceIds = new Set(selected?.doctor_services.map((ds) => ds.service_id) ?? [])

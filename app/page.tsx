@@ -14,7 +14,7 @@ import { Separator } from '@/components/ui/separator'
 import LandingForm from '@/components/marketing/landing-form'
 
 const DEMO_PATH = '/clinica-prueba'
-const ADMIN_PATH = '/admin'
+const ADMIN_PATH = '/admin/guest'
 const CONTACT_EMAIL = 'studiogxa@gmail.com'
 
 export const metadata: Metadata = {

@@ -5,6 +5,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { invalidateBookingCache } from '@/lib/cache'
 import { sendCancellationWhatsApp } from '@/lib/twilio/client'
 import { getBaseUrl } from '@/lib/utils'
+import { isGuestMode, DEMO_RESULT } from '@/lib/admin/guest-guard'
 import type { TablesInsert } from '@/lib/supabase/types'
 import { z } from 'zod'
 
@@ -61,6 +62,7 @@ async function bustSlotCaches(clinicSlug: string | null) {
 
 // ─── Weekly schedules ────────────────────────────────────────────────────────
 export async function createSchedule(formData: FormData) {
+  if (await isGuestMode()) return DEMO_RESULT
   const raw = Object.fromEntries(formData)
   const parsed = ScheduleSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.flatten().fieldErrors }
@@ -90,6 +92,7 @@ export async function createSchedule(formData: FormData) {
 }
 
 export async function deleteSchedule(id: string) {
+  if (await isGuestMode()) return DEMO_RESULT
   if (!UUID_RE.test(id)) return
   const supabase = await createClient()
   const { clinicSlug } = await getClinicContext(supabase)
@@ -100,6 +103,7 @@ export async function deleteSchedule(id: string) {
 }
 
 export async function toggleSchedule(id: string, isActive: boolean) {
+  if (await isGuestMode()) return DEMO_RESULT
   if (!UUID_RE.test(id)) return
   const supabase = await createClient()
   const { clinicSlug } = await getClinicContext(supabase)
@@ -240,6 +244,7 @@ export async function createScheduleException(
   input: ExceptionInput,
   options?: { cancelOverlapping?: boolean },
 ) {
+  if (await isGuestMode()) return DEMO_RESULT
   const parsed = ExceptionSchema.safeParse(input)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Datos inválidos.' }
@@ -378,6 +383,7 @@ async function cancelOverlappingAppointments(args: {
 }
 
 export async function deleteScheduleException(id: string) {
+  if (await isGuestMode()) return DEMO_RESULT
   if (!UUID_RE.test(id)) return
   const supabase = await createClient()
   const { clinicSlug } = await getClinicContext(supabase)

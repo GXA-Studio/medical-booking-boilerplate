@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { bookAppointmentManual } from '@/app/(admin)/admin/appointments/actions'
+import { useGuestMode } from '@/components/admin/guest-mode-context'
 import { findNextAvailableDate } from '@/app/(booking)/[clinicSlug]/actions'
 
 interface Doctor {
@@ -66,6 +67,7 @@ export function NewAppointmentDialog({
   prefill,
 }: Props) {
   const [selfOpen, setSelfOpen] = useState(false)
+  const { notifyDemo } = useGuestMode()
   const [pending, start]        = useTransition()
   const isControlled            = controlledOpen !== undefined
 
@@ -203,7 +205,8 @@ export function NewAppointmentDialog({
         startsAt: slotStart,
       })
 
-      if (result.error) {
+      if ('demo' in result) { notifyDemo(); return }
+      if ('error' in result && result.error) {
         toast({ variant: 'destructive', title: 'Error al crear cita', description: result.error })
         return
       }

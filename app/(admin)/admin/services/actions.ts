@@ -2,6 +2,7 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { invalidateBookingCache } from '@/lib/cache'
+import { isGuestMode, DEMO_RESULT } from '@/lib/admin/guest-guard'
 import { z } from 'zod'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -30,6 +31,7 @@ async function getClinicContext(supabase: Awaited<ReturnType<typeof createClient
 }
 
 export async function createService(formData: FormData) {
+  if (await isGuestMode()) return DEMO_RESULT
   const raw = Object.fromEntries(formData)
   const parsed = ServiceSchema.safeParse(raw)
   if (!parsed.success) return { error: parsed.error.flatten().fieldErrors }
@@ -50,6 +52,7 @@ export async function createService(formData: FormData) {
 }
 
 export async function updateService(id: string, formData: FormData) {
+  if (await isGuestMode()) return DEMO_RESULT
   if (!UUID_RE.test(id)) return { error: 'ID no válido.' }
 
   const raw = Object.fromEntries(formData)
@@ -75,6 +78,7 @@ export async function updateService(id: string, formData: FormData) {
 }
 
 export async function toggleService(id: string, isActive: boolean) {
+  if (await isGuestMode()) return DEMO_RESULT
   if (!UUID_RE.test(id)) return
   const supabase = await createClient()
   const { clinicId, clinicSlug } = await getClinicContext(supabase)

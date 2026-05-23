@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { sendWhatsAppConfirmation } from '@/lib/twilio/client'
 import { getBaseUrl, isValidE164, sanitizeName } from '@/lib/utils'
+import { isGuestMode, DEMO_RESULT } from '@/lib/admin/guest-guard'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -27,6 +28,7 @@ async function getClinicId(supabase: Awaited<ReturnType<typeof createClient>>) {
 }
 
 export async function cancelAppointment(id: string) {
+  if (await isGuestMode()) return DEMO_RESULT
   if (!UUID_RE.test(id)) return { error: 'Invalid appointment ID format' }
 
   const supabase = await createClient()
@@ -57,6 +59,7 @@ export interface BookManualFormData {
 }
 
 export async function bookAppointmentManual(data: BookManualFormData) {
+  if (await isGuestMode()) return DEMO_RESULT
   const { patientName, patientPhone, doctorId, serviceId, startsAt } = data
 
   const name  = sanitizeName(patientName)
