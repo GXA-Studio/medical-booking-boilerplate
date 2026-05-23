@@ -275,44 +275,76 @@ export async function createScheduleException(
           end_time:       parsed.data.end_time!   + ':00',
         }
 
-  const { error } = await supabase.from('doctor_schedule_exceptions').insert(row)
+  // B-1 race-condition mitigation: persist the exception BEFORE cancelling
+  // overlapping appointments. From the INSERT onward, get_available_slots /
+  // book_slot_confirmed will reject any new reservation in the window, so a
+  // patient cannot squeeze a booking in between the admin confirmation and
+  // the bulk cancel below. Any appointment that already existed (or slipped
+  // through before this INSERT) is captured by the UPDATE's RETURNING set,
+  // which then becomes the sole source of truth for Twilio notifications.
+  const { data: inserted, error: insertError } = await supabase
+    .from('doctor_schedule_exceptions')
+    .insert(row)
+    .select('id')
+    .single()
 
-  if (error) {
-    if (error.code === '23505') {
+  if (insertError || !inserted) {
+    if (insertError?.code === '23505') {
       return { error: 'Ya existe una excepción idéntica para esa fecha y rango.' }
     }
-    console.error('[createScheduleException] DB error:', error)
+    console.error('[createScheduleException] DB error:', insertError)
     return { error: 'Error al guardar la excepción.' }
   }
 
-  // Optional: cancel overlapping confirmed appointments and notify patients.
-  // Bookkeeping for the caller (UI toast) so we can report what we cleaned up.
   let cancelledCount = 0
   if (options?.cancelOverlapping) {
-    cancelledCount = await cancelOverlappingAppointments({
+    const cancelResult = await cancelOverlappingAppointments({
       doctorId: parsed.data.doctor_id,
       kind:     parsed.data.kind,
       date:     parsed.data.exception_date,
       startHM:  parsed.data.kind === 'partial' ? parsed.data.start_time! : null,
       endHM:    parsed.data.kind === 'partial' ? parsed.data.end_time!   : null,
     })
+
+    if (cancelResult.error) {
+      // Rollback the exception so the admin can retry cleanly — leaving it
+      // in place would block future bookings without ever notifying the
+      // patients whose appointments fall inside the window.
+      const { error: rollbackError } = await supabase
+        .from('doctor_schedule_exceptions')
+        .delete()
+        .eq('id', inserted.id)
+      if (rollbackError) {
+        console.error('[createScheduleException] rollback failed:', rollbackError)
+      }
+      return { error: 'No se pudieron cancelar las citas afectadas. Vuelve a intentarlo.' }
+    }
+
+    cancelledCount = cancelResult.rows.length
   }
 
   await bustSlotCaches(clinicSlug)
   return { success: true, cancelledCount }
 }
 
-// Finds confirmed appointments overlapping the exception window, marks them
-// as cancelled in a single UPDATE, then defers Twilio notifications via
-// after() + Promise.allSettled so the response stays fast (Vercel will keep
-// the function alive until the WhatsApp calls resolve).
+// Cancels confirmed appointments overlapping the exception window in a single
+// UPDATE ... RETURNING. The returned set is the canonical list of affected
+// patients — Twilio notifications are dispatched exclusively from it, so the
+// admin never gets a count that diverges from the rows actually mutated.
+type CancelledRow = {
+  id:            string
+  patient_name:  string
+  patient_phone: string
+  starts_at:     string
+}
+
 async function cancelOverlappingAppointments(args: {
   doctorId: string
   kind:     'full-day' | 'partial'
   date:     string
   startHM:  string | null
   endHM:    string | null
-}): Promise<number> {
+}): Promise<{ rows: CancelledRow[]; error?: string }> {
   const supabase = await createClient()
 
   const { data: doctorRow } = await supabase
@@ -349,24 +381,26 @@ async function cancelOverlappingAppointments(args: {
 
   if (error) {
     console.error('[cancelOverlappingAppointments] DB error:', error)
-    return 0
+    return { rows: [], error: error.message }
   }
 
-  const rows = cancelled ?? []
-  if (rows.length === 0) return 0
+  const rows = (cancelled ?? []) as CancelledRow[]
+  if (rows.length === 0) return { rows }
 
   // Defer Twilio so the action returns immediately. Promise.allSettled keeps
-  // one failed send from blocking the others.
+  // one failed send from blocking the others. The closure iterates ONLY the
+  // rows returned by RETURNING — never recomputes a window query — so the
+  // notification set cannot diverge from the cancelled set.
   after(async () => {
     const baseUrl      = getBaseUrl()
     const rescheduleUrl = clinicSlug ? `${baseUrl}/${clinicSlug}` : undefined
     const results = await Promise.allSettled(
       rows.map((r) =>
         sendCancellationWhatsApp({
-          to:          r.patient_phone as string,
-          patientName: r.patient_name as string,
+          to:          r.patient_phone,
+          patientName: r.patient_name,
           clinicName,
-          startsAt:    r.starts_at as string,
+          startsAt:    r.starts_at,
           timezone,
           doctorName:   doctorName ?? undefined,
           rescheduleUrl,
@@ -379,7 +413,7 @@ async function cancelOverlappingAppointments(args: {
     }
   })
 
-  return rows.length
+  return { rows }
 }
 
 export async function deleteScheduleException(id: string) {

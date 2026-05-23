@@ -1,27 +1,11 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
-import { createHash, createHmac, randomInt } from 'crypto'
 import { formatInTimeZone } from 'date-fns-tz'
 import { es } from 'date-fns/locale'
 
 // shadcn/ui standard cn helper
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
-}
-
-// ---------- OTP ----------
-
-// L-01 FIX: exclusive upper bound → use 1_000_000 to include 999999 (full 900,000 space)
-export function generateOTP(): string {
-  return String(randomInt(100000, 1_000_000))
-}
-
-// M-02 FIX: HMAC-SHA256 with server-side pepper prevents rainbow table attacks.
-// Even if otp_code_hash column is leaked, reversing requires knowing OTP_HASH_PEPPER.
-export function hashOTP(otp: string): string {
-  const pepper = process.env.OTP_HASH_PEPPER
-  if (!pepper) throw new Error('OTP_HASH_PEPPER env var must be set')
-  return createHmac('sha256', pepper).update(otp).digest('hex')
 }
 
 // ---------- Date / Timezone ----------
