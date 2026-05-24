@@ -155,9 +155,14 @@ export function BookingWizard({ clinic }: { clinic: ClinicBookingData }) {
     })
   }, [])
 
-  async function bookInstant(name: string, phone: string) {
+  async function bookInstant(name: string, phone: string, consented: boolean) {
     setIsLoading(true)
     setPatientError(null)
+    if (consented !== true) {
+      setPatientError('Debes aceptar la política de privacidad para confirmar tu cita.')
+      setIsLoading(false)
+      return
+    }
     try {
       const res = await fetch('/api/book', {
         method:  'POST',
@@ -169,6 +174,7 @@ export function BookingWizard({ clinic }: { clinic: ClinicBookingData }) {
           startsAt:     state.slotStart!,
           patientName:  name,
           patientPhone: phone,
+          consentAccepted: true,
         }),
       })
       const body = await res.json()

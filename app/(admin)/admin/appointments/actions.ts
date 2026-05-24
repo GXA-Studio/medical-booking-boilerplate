@@ -52,11 +52,14 @@ export interface BookManualFormData {
   doctorId: string
   serviceId: string
   startsAt: string
+  // L-A9: the receptionist must affirm that verbal GDPR consent was obtained
+  // before the appointment is persisted. The flag is recorded as consent_at.
+  consentAccepted: boolean
 }
 
 export async function bookAppointmentManual(data: BookManualFormData) {
   if (await isGuestMode()) return DEMO_RESULT
-  const { patientName, patientPhone, doctorId, serviceId, startsAt } = data
+  const { patientName, patientPhone, doctorId, serviceId, startsAt, consentAccepted } = data
 
   const name  = sanitizeName(patientName)
   const phone = sanitizePhone(patientPhone)
@@ -66,6 +69,9 @@ export async function bookAppointmentManual(data: BookManualFormData) {
   if (!UUID_RE.test(doctorId))  return { error: 'Médico no válido.' }
   if (!UUID_RE.test(serviceId)) return { error: 'Servicio no válido.' }
   if (new Date(startsAt) < new Date()) return { error: 'La fecha y hora deben ser en el futuro.' }
+  if (consentAccepted !== true) {
+    return { error: 'Debes confirmar que el paciente ha otorgado su consentimiento RGPD.' }
+  }
 
   const supabase = await createClient()
   const clinicId = await getClinicId(supabase)
@@ -79,7 +85,9 @@ export async function bookAppointmentManual(data: BookManualFormData) {
 
   // book_slot_confirmed is GRANTed to anon/authenticated and validates its own
   // clinic/doctor/service relationships (S-1 through S-4); the admin's session
-  // client is enough to invoke it.
+  // client is enough to invoke it. L-A9: stamp consent at the moment the action
+  // runs server-side so the timestamp matches the booking transaction.
+  const consentAt = new Date().toISOString()
   const { data: appointment, error: bookError } = await supabase.rpc('book_slot_confirmed', {
     p_clinic_id:     clinicId,
     p_doctor_id:     doctorId,
@@ -87,6 +95,7 @@ export async function bookAppointmentManual(data: BookManualFormData) {
     p_patient_name:  name,
     p_patient_phone: phone,
     p_starts_at:     startsAt,
+    p_consent_at:    consentAt,
   })
 
   if (bookError) {

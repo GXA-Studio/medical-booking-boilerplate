@@ -15,18 +15,15 @@ export async function getClinicLegalData(slug: string | null | undefined): Promi
   if (!slug) return null
 
   const supabase = createServiceClient()
-  // `legal_name` and `cif` columns added in migration 20260522130000_clinic_legal_fields.sql.
-  // Until `npm run db:types` is re-run against the linked project, the generated types
-  // don't know these columns exist, so we cast through unknown to bypass the static check.
-  const { data, error } = await (supabase
+  const { data, error } = await supabase
     .from('clinics')
     .select('name, legal_name, cif, address')
     .eq('slug', slug)
-    .maybeSingle() as unknown as Promise<{ data: ClinicLegalData | null; error: { message: string } | null }>)
+    .maybeSingle()
 
   if (error) {
     console.warn('[getClinicLegalData] supabase error for slug', slug, '→', error.message)
     return null
   }
-  return data ?? null
+  return data
 }

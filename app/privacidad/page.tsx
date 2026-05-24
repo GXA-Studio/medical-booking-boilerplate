@@ -135,6 +135,8 @@ export default async function PrivacidadPage({ searchParams }: PageProps) {
               ['Twilio Inc. (EE. UU.)',    'Envío de mensajes WhatsApp de confirmación y recordatorio. Opera bajo cláusulas contractuales tipo (SCCs) aprobadas por la Comisión Europea.'],
               ['Supabase Inc. (EE. UU.)',  'Almacenamiento cifrado de la base de datos de citas. Opera bajo cláusulas contractuales tipo (SCCs) aprobadas por la Comisión Europea.'],
               ['Vercel Inc. (EE. UU.)',    'Alojamiento y distribución de la aplicación web. Opera bajo cláusulas contractuales tipo (SCCs) aprobadas por la Comisión Europea.'],
+              ['Upstash, Inc. (EE. UU.)',  'Servicio Redis utilizado para rate-limiting de las APIs públicas (reservas, leads, búsqueda de slots) y para mitigar abuso. Solo procesa la IP del solicitante de forma transitoria. Opera bajo cláusulas contractuales tipo (SCCs) aprobadas por la Comisión Europea.'],
+              ['Google LLC (EE. UU.)',     'Servicio Gmail SMTP utilizado por la clínica para el envío de notificaciones operativas (avisos de leads de marketing al equipo). Opera bajo cláusulas contractuales tipo (SCCs) aprobadas por la Comisión Europea.'],
             ]} />
             <P className="mt-3">
               Todos los proveedores indicados actúan como encargados del tratamiento bajo
@@ -187,7 +189,11 @@ export default async function PrivacidadPage({ searchParams }: PageProps) {
                 {CONTACT_EMAIL}
               </a>{' '}
               indicando su nombre completo, el derecho que desea ejercer y su número de
-              teléfono. Responderemos en el plazo máximo de <strong>30 días</strong>.
+              teléfono. Responderemos en el plazo máximo de <strong>30 días</strong> desde la
+              recepción de la solicitud, prorrogable hasta <strong>60 días</strong> adicionales
+              cuando la complejidad o el número de solicitudes lo justifique, conforme al
+              art. 12.3 RGPD. En ese caso le comunicaremos la prórroga y sus motivos dentro
+              del plazo inicial de un mes.
             </P>
             <P className="mt-2">
               Si considera que el tratamiento no se ajusta a la normativa vigente, puede

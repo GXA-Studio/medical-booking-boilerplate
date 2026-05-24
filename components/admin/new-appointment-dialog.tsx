@@ -100,6 +100,9 @@ export function NewAppointmentDialog({
   const [date,         setDate]         = useState(todayLocalDate())
   const [slotStart,    setSlotStart]    = useState('')
   const [timeFilter,   setTimeFilter]   = useState<TimeFilter>('any')
+  // L-A9: the receptionist must affirm verbal GDPR consent before the
+  // booking is persisted. The server action rejects the request otherwise.
+  const [consentAccepted, setConsentAccepted] = useState(false)
 
   const [slots,            setSlots]           = useState<string[]>([])
   // Mode B only: maps slot ISO start → available doctors at that time
@@ -227,6 +230,7 @@ export function NewAppointmentDialog({
     setSlotDoctorsMap({})
     setResolvedDoctorId('')
     setTimeFilter('any')
+    setConsentAccepted(false)
     prevOpen.current = false
   }
 
@@ -310,6 +314,15 @@ export function NewAppointmentDialog({
       return
     }
 
+    if (!consentAccepted) {
+      toast({
+        variant: 'destructive',
+        title: 'Consentimiento RGPD requerido',
+        description: 'Confirma que el paciente ha otorgado su consentimiento antes de continuar.',
+      })
+      return
+    }
+
     start(async () => {
       const result = await bookAppointmentManual({
         patientName:  patientName.trim(),
@@ -317,6 +330,7 @@ export function NewAppointmentDialog({
         doctorId:     effectiveDoctorId,
         serviceId,
         startsAt: slotStart,
+        consentAccepted,
       })
 
       if ('demo' in result) { notifyDemo(); return }
@@ -534,6 +548,21 @@ export function NewAppointmentDialog({
               })}
             </div>
           )}
+
+          {/* L-A9: Verbal RGPD consent affirmation — receptionist-side gate */}
+          <label className="flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={consentAccepted}
+              onChange={(e) => setConsentAccepted(e.target.checked)}
+              disabled={pending}
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-primary cursor-pointer"
+            />
+            <span>
+              Confirmo que el paciente ha otorgado su consentimiento para el tratamiento de sus datos
+              conforme al RGPD. <span className="text-destructive">*</span>
+            </span>
+          </label>
         </div>
 
         <DialogFooter>
@@ -542,7 +571,14 @@ export function NewAppointmentDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={pending || !patientName || !patientPhone || !slotStart || (isAnyDoctor && !resolvedDoctorId)}
+            disabled={
+              pending ||
+              !patientName ||
+              !patientPhone ||
+              !slotStart ||
+              (isAnyDoctor && !resolvedDoctorId) ||
+              !consentAccepted
+            }
           >
             {pending ? (
               <>

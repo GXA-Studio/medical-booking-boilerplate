@@ -149,6 +149,10 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
   const [weekSlots,    setWeekSlots]    = useState<WeekSlotsMap>({})
   const [dates,        setDates]        = useState<string[]>([])
   const [slotsLoading, setSlotsLoading] = useState(false)
+  // True when the most recent /api/slots/week request was rate-limited (HTTP 429).
+  // Surfaced in the UI so users see a clear "wait a minute" message instead of
+  // a silent empty state. Reset on every new fetch attempt.
+  const [rateLimited,  setRateLimited]  = useState(false)
 
   const [modal, setModal] = useState<ModalBookingState>({
     open:          false,
@@ -180,6 +184,7 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
     setWeekSlots({})
     setDates([])
     setNoNextAvailable(false)
+    setRateLimited(false)
 
     const params = new URLSearchParams({
       serviceId: filters.serviceId,
@@ -188,11 +193,26 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
     if (filters.doctorId) params.set('doctorId', filters.doctorId)
 
     fetch(`/api/slots/week?${params}`)
-      .then((r) => r.json())
-      .then(({ dates: d, slots: s }) => {
+      .then(async (r) => {
+        // Distinguish a 429 from a generic failure so the UI can show a
+        // targeted message instead of falling silently back to empty state.
+        if (r.status === 429) {
+          if (!cancelled) {
+            setRateLimited(true)
+            setDates([])
+            setWeekSlots({})
+          }
+          return
+        }
+        const body = await r.json().catch(() => ({}))
         if (cancelled) return
-        setDates(d ?? [])
-        setWeekSlots(s ?? {})
+        if (!r.ok) {
+          setDates([]); setWeekSlots({})
+          console.error('[BookingSearch] /slots/week returned', r.status, body)
+          return
+        }
+        setDates(body.dates ?? [])
+        setWeekSlots(body.slots ?? {})
       })
       .catch((err) => {
         if (!cancelled) { setDates([]); setWeekSlots({}) }
@@ -398,6 +418,22 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
             <div className="flex items-center justify-center py-20 text-slate-400 gap-3">
               <Loader2 className="h-5 w-5 animate-spin" />
               <span className="text-sm">Buscando disponibilidad…</span>
+            </div>
+          ) : rateLimited ? (
+            <div
+              role="alert"
+              className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-12 text-center"
+            >
+              <SearchX className="h-8 w-8 text-amber-400" />
+              <div>
+                <p className="text-sm font-semibold text-amber-900">
+                  Demasiadas peticiones. Espera un minuto.
+                </p>
+                <p className="text-xs text-amber-700 mt-1">
+                  Hemos limitado temporalmente las búsquedas desde esta conexión para evitar
+                  abusos. Vuelve a intentarlo en breve.
+                </p>
+              </div>
             </div>
           ) : (
             // ─── FASE 2: Bifurcación del renderizado ─────────────────────────

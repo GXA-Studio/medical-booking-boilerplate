@@ -19,6 +19,11 @@ const BookSchema = z.object({
     message: 'Phone must be E.164 format, e.g. +34612345678',
   }),
   startsAt: z.string().datetime({ offset: true }),
+  // L-A9: GDPR consent must be explicit. Booleans other than true
+  // are rejected so a forgotten checkbox cannot persist a booking.
+  consentAccepted: z.literal(true, {
+    errorMap: () => ({ message: 'GDPR consent is required to book an appointment.' }),
+  }),
 })
 
 function getClientIp(req: NextRequest): string {
@@ -77,6 +82,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Clinic not found' }, { status: 404 })
   }
 
+  // L-A9: stamp the consent at the moment the validated request reaches the
+  // server — the timestamp lives in DB next to the booking so the controller
+  // can demonstrate when consent was granted (art. 7.1 RGPD).
+  const consentAt = new Date().toISOString()
+
   const { data: appointment, error: bookError } = await supabase.rpc('book_slot_confirmed', {
     p_clinic_id:     clinicId,
     p_doctor_id:     doctorId,
@@ -84,6 +94,7 @@ export async function POST(req: NextRequest) {
     p_patient_name:  patientName,
     p_patient_phone: patientPhone,
     p_starts_at:     startsAt,
+    p_consent_at:    consentAt,
   })
 
   if (bookError) {

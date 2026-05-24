@@ -14,7 +14,10 @@ interface Props {
   doctor:      DoctorOption
   timezone:    string
   slotStart:   string
-  onSubmit:    (name: string, phone: string) => Promise<void>
+  // L-A9: `consented` is propagated upstream so the wizard cannot accidentally
+  // submit a booking without explicit GDPR consent — the server still
+  // re-validates this flag and the DB constraint is the last line of defence.
+  onSubmit:    (name: string, phone: string, consented: boolean) => Promise<void>
   onBack:      () => void
   isLoading:   boolean
   error:       string | null
@@ -47,8 +50,10 @@ export function StepPatient({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setTouched({ name: true, phone: true })
-    if (!canSubmit) return
-    onSubmit(name.trim(), phone.trim())
+    // L-A9: defence-in-depth. Even if a future refactor weakens `canSubmit`,
+    // this guard ensures we never invoke `onSubmit` without explicit consent.
+    if (!nameValid || !phoneValid || !consented || isLoading) return
+    onSubmit(name.trim(), phone.trim(), consented)
   }
 
   return (
@@ -111,6 +116,8 @@ export function StepPatient({
           <Input
             id="patient-phone"
             type="tel"
+            inputMode="tel"
+            autoComplete="tel"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             onBlur={() => setTouched((p) => ({ ...p, phone: true }))}

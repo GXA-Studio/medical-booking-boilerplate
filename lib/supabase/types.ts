@@ -19,6 +19,7 @@ export type Database = {
           cancellation_token: string
           clinic_id: string
           color: string | null
+          consent_at: string
           created_at: string
           doctor_id: string
           ends_at: string
@@ -37,6 +38,7 @@ export type Database = {
           cancellation_token?: string
           clinic_id: string
           color?: string | null
+          consent_at?: string
           created_at?: string
           doctor_id: string
           ends_at: string
@@ -55,6 +57,7 @@ export type Database = {
           cancellation_token?: string
           clinic_id?: string
           color?: string | null
+          consent_at?: string
           created_at?: string
           doctor_id?: string
           ends_at?: string
@@ -298,6 +301,39 @@ export type Database = {
         }
         Relationships: []
       }
+      leads: {
+        Row: {
+          clinica: string | null
+          created_at: string | null
+          email: string
+          fuente: string | null
+          id: string
+          mensaje: string | null
+          nombre: string
+          telefono: string | null
+        }
+        Insert: {
+          clinica?: string | null
+          created_at?: string | null
+          email: string
+          fuente?: string | null
+          id?: string
+          mensaje?: string | null
+          nombre: string
+          telefono?: string | null
+        }
+        Update: {
+          clinica?: string | null
+          created_at?: string | null
+          email?: string
+          fuente?: string | null
+          id?: string
+          mensaje?: string | null
+          nombre?: string
+          telefono?: string | null
+        }
+        Relationships: []
+      }
       marketing_leads: {
         Row: {
           clinic: string
@@ -459,6 +495,7 @@ export type Database = {
       book_slot_confirmed: {
         Args: {
           p_clinic_id: string
+          p_consent_at: string
           p_doctor_id: string
           p_patient_name: string
           p_patient_phone: string
@@ -469,6 +506,7 @@ export type Database = {
           cancellation_token: string
           clinic_id: string
           color: string | null
+          consent_at: string
           created_at: string
           doctor_id: string
           ends_at: string
@@ -521,6 +559,7 @@ export type Database = {
           cancellation_token: string
           clinic_id: string
           color: string | null
+          consent_at: string
           created_at: string
           doctor_id: string
           ends_at: string

@@ -2,6 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendWhatsAppReminder } from '@/lib/twilio/client'
 
+// S-A4: derive the cancellation/reschedule base URL from the forwarded
+// headers Vercel injects on every request, mirroring the Twilio webhook
+// pattern. NEXT_PUBLIC_APP_URL drifts from the actual host on preview
+// deployments, which broke reminder links whenever the cron fired against
+// a *.vercel.app URL different from the production env value.
+function buildBaseUrl(req: NextRequest): string {
+  const proto = req.headers.get('x-forwarded-proto') ?? 'https'
+  const host  = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? ''
+  return `${proto}://${host}`
+}
+
 // GET /api/cron/reminders
 //
 // Sends 24h WhatsApp reminders for upcoming confirmed appointments.
@@ -20,7 +31,7 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase  = createServiceClient()
-  const baseUrl   = process.env.NEXT_PUBLIC_APP_URL ?? ''
+  const baseUrl   = buildBaseUrl(req)
   const now       = new Date()
   const windowStart = new Date(now.getTime() + 23 * 60 * 60 * 1000)  // T+23h
   const windowEnd   = new Date(now.getTime() + 25 * 60 * 60 * 1000)  // T+25h

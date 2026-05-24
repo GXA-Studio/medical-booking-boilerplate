@@ -280,7 +280,7 @@ export async function createScheduleException(
   }
 
   const supabase = await createClient()
-  const { clinicSlug } = await assertDoctorOwnership(supabase, parsed.data.doctor_id)
+  const { clinicId, clinicSlug } = await assertDoctorOwnership(supabase, parsed.data.doctor_id)
 
   if (parsed.data.exception_date < todayLocalISO()) {
     return { error: 'No puedes añadir excepciones para fechas pasadas.' }
@@ -328,6 +328,7 @@ export async function createScheduleException(
   let cancelledCount = 0
   if (options?.cancelOverlapping) {
     const cancelResult = await cancelOverlappingAppointments({
+      clinicId,
       doctorId: parsed.data.doctor_id,
       kind:     parsed.data.kind,
       date:     parsed.data.exception_date,
@@ -368,6 +369,7 @@ type CancelledRow = {
 }
 
 async function cancelOverlappingAppointments(args: {
+  clinicId: string
   doctorId: string
   kind:     'full-day' | 'partial'
   date:     string
@@ -397,10 +399,33 @@ async function cancelOverlappingAppointments(args: {
 
   // Service-role client to bypass RLS for the bulk update + notify pipeline.
   const svc = createServiceClient()
+
+  // S-A6 defence-in-depth: build the canonical doctor-ID set for the
+  // verified clinic and AND-scope the UPDATE by it. Even if `args.doctorId`
+  // were tampered with to point at another tenant, the `.in()` filter would
+  // reject the row before it reaches the appointments table.
+  const { data: clinicDoctors, error: doctorListError } = await svc
+    .from('doctors')
+    .select('id')
+    .eq('clinic_id', args.clinicId)
+  if (doctorListError) {
+    console.error('[cancelOverlappingAppointments] doctor-list lookup failed:', doctorListError)
+    return { rows: [], error: doctorListError.message }
+  }
+  const allowedDoctorIds = (clinicDoctors ?? []).map((d) => d.id)
+  if (!allowedDoctorIds.includes(args.doctorId)) {
+    console.error(
+      '[cancelOverlappingAppointments] cross-tenant attempt blocked',
+      { clinicId: args.clinicId, doctorId: args.doctorId },
+    )
+    return { rows: [], error: 'Doctor outside clinic scope' }
+  }
+
   const { data: cancelled, error } = await svc
     .from('appointments')
     .update({ status: 'cancelled' })
     .eq('doctor_id', args.doctorId)
+    .in('doctor_id', allowedDoctorIds)
     .eq('status', 'confirmed')
     .lt('starts_at', windowEndUtc.toISOString())
     .gt('ends_at',   windowStartUtc.toISOString())

@@ -53,11 +53,15 @@ export async function POST(req: NextRequest) {
   const userAgent = req.headers.get('user-agent') ?? null
 
   const supabase = createServiceClient()
-  // `marketing_leads` table added in migration 20260522120000_marketing_leads.sql.
-  // Until `npm run db:types` is re-run, the generated Database type doesn't know this table.
-  // We cast the client to bypass the static check; the actual SQL exists at runtime.
-  const { data: lead, error: insertError } = await (supabase
-    .from('marketing_leads' as never) as ReturnType<typeof supabase.from>)
+  // GDPR — Base de legitimación para persistir la IP y el user-agent en
+  // `marketing_leads`: art. 6.1.f) RGPD (interés legítimo). El interés
+  // perseguido es la prevención de fraude/abuso del formulario público y la
+  // aplicación del rate-limit por IP (lib/rate-limit) que protege la
+  // disponibilidad del servicio. La IP no se utiliza para perfilado ni se
+  // cruza con otras finalidades, y queda sujeta a los mismos plazos de
+  // conservación documentados en la política de privacidad.
+  const { data: lead, error: insertError } = await supabase
+    .from('marketing_leads')
     .insert({
       name,
       email,
@@ -66,9 +70,9 @@ export async function POST(req: NextRequest) {
       ip: ip === 'unknown' ? null : ip,
       user_agent: userAgent,
       source: 'landing',
-    } as never)
+    })
     .select('id')
-    .single() as unknown as { data: { id: string } | null; error: { message: string } | null }
+    .single()
 
   if (insertError) {
     console.error('[POST /api/leads] insert error:', insertError)
