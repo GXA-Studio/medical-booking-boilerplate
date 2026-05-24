@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { StepPatient } from './step-patient'
-import type { ServiceOption, DoctorOption } from './types'
+import type { ServiceOption, DoctorOption, PatientFormState } from './types'
 
 interface Props {
   open:         boolean
@@ -13,10 +13,15 @@ interface Props {
   doctor:       DoctorOption
   slotStart:    string
   onConfirmed:  (patientName: string) => void
+  // UX-A7: patient form state lives in the parent so a confirmed booking can
+  // reset only the slot/service/doctor without clearing name/phone/consent.
+  patientForm:        PatientFormState
+  onPatientFormChange: (next: PatientFormState) => void
 }
 
 export function BookingModal({
   open, onOpenChange, clinicId, timezone, service, doctor, slotStart, onConfirmed,
+  patientForm, onPatientFormChange,
 }: Props) {
   const [isLoading,    setIsLoading]    = useState(false)
   const [patientError, setPatientError] = useState<string | null>(null)
@@ -29,7 +34,7 @@ export function BookingModal({
     onOpenChange(nextOpen)
   }
 
-  async function bookInstant(name: string, phone: string) {
+  async function bookInstant(name: string, phone: string, consented: boolean) {
     setIsLoading(true)
     setPatientError(null)
     try {
@@ -38,11 +43,12 @@ export function BookingModal({
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           clinicId,
-          doctorId:     doctor.id,
-          serviceId:    service.id,
-          startsAt:     slotStart,
-          patientName:  name,
-          patientPhone: phone,
+          doctorId:        doctor.id,
+          serviceId:       service.id,
+          startsAt:        slotStart,
+          patientName:     name,
+          patientPhone:    phone,
+          consentAccepted: consented,
         }),
       })
       const body = await res.json()
@@ -81,6 +87,8 @@ export function BookingModal({
           onBack={() => handleOpenChange(false)}
           isLoading={isLoading}
           error={patientError}
+          patientForm={patientForm}
+          onPatientFormChange={onPatientFormChange}
         />
       </DialogContent>
     </Dialog>

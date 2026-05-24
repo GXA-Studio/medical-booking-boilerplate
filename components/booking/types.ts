@@ -79,3 +79,12 @@ export interface ModalBookingState {
   patientPhone:  string
   appointmentId: string | null
 }
+
+// UX-A7: held in the parent (BookingSearch) so a confirmed booking can reset
+// service/doctor/date while keeping name + phone + consent ready for the
+// patient's next reservation — no friction on the second booking.
+export interface PatientFormState {
+  name:      string
+  phone:     string
+  consented: boolean
+}

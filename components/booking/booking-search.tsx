@@ -17,6 +17,7 @@ import type {
   SearchFilters,
   WeekSlotsMap,
   ModalBookingState,
+  PatientFormState,
 } from './types'
 
 function todayString(): string {
@@ -170,6 +171,14 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
     slotStart: string | null
     doctors:   DoctorOption[]
   }>({ open: false, slotStart: null, doctors: [] })
+
+  // UX-A7: hoisted so handleReset can wipe the slot/service/doctor selection
+  // without forcing the patient to retype name/phone/consent for the next booking.
+  const [patientForm, setPatientForm] = useState<PatientFormState>({
+    name:      '',
+    phone:     '+34',
+    consented: false,
+  })
 
   const [isConfirmed,      setIsConfirmed]      = useState(false)
   const [confirmedPatient, setConfirmedPatient] = useState('')
@@ -370,6 +379,9 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
   }
 
   function handleReset() {
+    // UX-A7: deliberately do NOT touch patientForm — the patient can confirm a
+    // second cita without retyping name/phone or re-checking the consent box.
+    // Only the slot context (service, doctor, date, week) is cleared.
     setIsConfirmed(false)
     setConfirmedPatient('')
     setFilters(initialFilters)
@@ -559,6 +571,8 @@ export function BookingSearch({ clinic }: { clinic: ClinicBookingData }) {
               doctor={modal.doctor}
               slotStart={modal.slotStart}
               onConfirmed={handleConfirmed}
+              patientForm={patientForm}
+              onPatientFormChange={setPatientForm}
             />
           )}
         </motion.div>

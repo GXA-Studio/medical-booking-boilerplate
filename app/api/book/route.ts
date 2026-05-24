@@ -66,20 +66,45 @@ export async function POST(req: NextRequest) {
       )
     }
   } catch (err) {
-    // Fail open: if Redis is unavailable, let the booking proceed rather than block users
-    console.warn('[POST /api/book] Rate limiter unavailable, proceeding without limit check:', err)
+    // S-A3: fail-closed. If the limiter is unreachable we cannot prove the
+    // request is within quota, so we must refuse the booking instead of
+    // letting an attacker flood the endpoint while Redis is offline.
+    console.error('[POST /api/book] Rate limiter unavailable — refusing booking (fail-closed):', err)
+    return NextResponse.json(
+      { error: 'RATE_LIMITER_UNAVAILABLE', message: 'Booking service is temporarily unavailable. Please try again shortly.' },
+      { status: 500 }
+    )
   }
 
   const supabase = createServiceClient()
 
   const { data: clinic } = await supabase
     .from('clinics')
-    .select('id, name, timezone')
+    .select('id, name, timezone, legal_name, cif')
     .eq('id', clinicId)
     .single()
 
   if (!clinic) {
     return NextResponse.json({ error: 'Clinic not found' }, { status: 404 })
+  }
+
+  // L-A8: a booking implies the patient accepts the clinic's privacy policy.
+  // If the controller's legal identity (legal_name + CIF) is missing the
+  // policy collapses to a generic placeholder, so the consent we collect is
+  // not enforceable. Block the booking with a clear, actionable message that
+  // the wizard surfaces verbatim — status 422 keeps this distinct from the
+  // 409/SLOT_TAKEN path already special-cased by clients.
+  const legalName = (clinic as { legal_name: string | null }).legal_name?.trim() ?? ''
+  const legalCif  = (clinic as { cif: string | null }).cif?.trim() ?? ''
+  if (legalName.length === 0 || legalCif.length === 0) {
+    console.error('[POST /api/book] LEGAL_RESPONSIBLE_NOT_CONFIGURED for clinic', clinicId, { legalName, legalCif })
+    return NextResponse.json(
+      {
+        error: 'El responsable legal no está configurado. La clínica debe completar sus datos legales antes de aceptar reservas.',
+        code:  'LEGAL_RESPONSIBLE_NOT_CONFIGURED',
+      },
+      { status: 422 },
+    )
   }
 
   // L-A9: stamp the consent at the moment the validated request reaches the

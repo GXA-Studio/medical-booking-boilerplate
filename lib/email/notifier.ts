@@ -1,21 +1,101 @@
 import 'server-only'
 import nodemailer from 'nodemailer'
 
-const NOTIFICATION_INBOX = 'studiogxa@gmail.com'
+// Free / personal email providers that MUST NOT be used as the SMTP identity
+// for outbound clinic notifications. Enforcing a corporate domain prevents the
+// service from quietly degrading to a personal Gmail (or similar) account if
+// an operator copy-pastes the wrong credentials into the deployment env.
+const FORBIDDEN_PROVIDER_DOMAINS = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'yahoo.com',
+  'ymail.com',
+  'hotmail.com',
+  'outlook.com',
+  'live.com',
+  'msn.com',
+  'icloud.com',
+  'me.com',
+  'aol.com',
+  'protonmail.com',
+  'proton.me',
+])
 
+interface CorporateMailerConfig {
+  readonly host:              string
+  readonly port:              number
+  readonly secure:            boolean
+  readonly user:              string
+  readonly password:          string
+  readonly notificationInbox: string
+  readonly fromName:          string
+}
+
+function requireEnv(name: string): string {
+  const value = process.env[name]
+  if (!value || value.trim().length === 0) {
+    throw new Error(
+      `[email/notifier] Missing required env var ${name}. Corporate SMTP credentials must be configured explicitly — no fallback is allowed.`,
+    )
+  }
+  return value.trim()
+}
+
+function assertCorporateAddress(address: string, varName: string): void {
+  const at = address.lastIndexOf('@')
+  if (at < 1 || at === address.length - 1) {
+    throw new Error(`[email/notifier] ${varName}="${address}" is not a valid email address`)
+  }
+  const domain = address.slice(at + 1).toLowerCase()
+  if (FORBIDDEN_PROVIDER_DOMAINS.has(domain)) {
+    throw new Error(
+      `[email/notifier] ${varName} domain "${domain}" is a free/personal provider; ` +
+      'a corporate domain is required for clinic notifications.',
+    )
+  }
+}
+
+function loadConfig(): CorporateMailerConfig {
+  const host              = requireEnv('CORPORATE_SMTP_HOST')
+  const portRaw           = requireEnv('CORPORATE_SMTP_PORT')
+  const user              = requireEnv('CORPORATE_SMTP_USER')
+  const password          = requireEnv('CORPORATE_SMTP_PASSWORD')
+  const notificationInbox = requireEnv('CORPORATE_NOTIFICATION_INBOX')
+  const fromName          = requireEnv('CORPORATE_SMTP_FROM_NAME')
+
+  const port = Number.parseInt(portRaw, 10)
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+    throw new Error(`[email/notifier] CORPORATE_SMTP_PORT="${portRaw}" is not a valid TCP port`)
+  }
+
+  assertCorporateAddress(user, 'CORPORATE_SMTP_USER')
+  assertCorporateAddress(notificationInbox, 'CORPORATE_NOTIFICATION_INBOX')
+
+  return {
+    host,
+    port,
+    secure: port === 465,
+    user,
+    password,
+    notificationInbox,
+    fromName,
+  }
+}
+
+let _config: CorporateMailerConfig | null = null
 let _transporter: nodemailer.Transporter | null = null
 
-function getTransporter(): nodemailer.Transporter | null {
-  const user = process.env.GMAIL_APP_USER
-  const pass = process.env.GMAIL_APP_PASSWORD
-  if (!user || !pass) return null
+function getMailer(): { transporter: nodemailer.Transporter; config: CorporateMailerConfig } {
+  if (!_config) _config = loadConfig()
   if (!_transporter) {
     _transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: { user, pass },
+      host:   _config.host,
+      port:   _config.port,
+      secure: _config.secure,
+      auth:   { user: _config.user, pass: _config.password },
     })
   }
-  return _transporter
+  return { transporter: _transporter, config: _config }
 }
 
 export interface LeadNotificationPayload {
@@ -25,21 +105,19 @@ export interface LeadNotificationPayload {
   message?: string
 }
 
-// Sends an email to NOTIFICATION_INBOX with the lead details.
-// If GMAIL credentials are missing, logs a warning and silently no-ops —
-// lead capture (DB insert) must not break because of a notification failure.
+// Sends both an internal notification to the corporate inbox and a courtesy
+// confirmation to the lead. Throws if the corporate SMTP env vars are missing
+// or point at a free provider — the caller is expected to wrap this in a
+// try/catch so a misconfigured mailer doesn't drop the underlying lead row.
 export async function sendLeadNotificationEmail(payload: LeadNotificationPayload): Promise<void> {
-  const transporter = getTransporter()
-  if (!transporter) {
-    console.warn('[sendLeadNotificationEmail] GMAIL_APP_USER/GMAIL_APP_PASSWORD missing — skipping email notification')
-    return
-  }
+  const { transporter, config } = getMailer()
 
   const { name, email, clinic, message } = payload
   const safeMessage = message
     ? message.replace(/[<>]/g, (c) => (c === '<' ? '&lt;' : '&gt;'))
     : ''
 
+  const fromAddress = `"${config.fromName}" <${config.user}>`
   const subject = `Nuevo lead — ${name} (${clinic})`
   const text =
     `Nuevo lead capturado desde la landing.\n\n` +
@@ -60,7 +138,7 @@ export async function sendLeadNotificationEmail(payload: LeadNotificationPayload
     (safeMessage
       ? `<div style="margin-top:16px;padding:12px;background:#f5f5f5;border-radius:4px;font-size:14px;line-height:1.5;"><strong>Nota:</strong><br/>${safeMessage.replace(/\n/g, '<br/>')}</div>`
       : '') +
-    `<p style="margin-top:20px;font-size:12px;color:#999;">Captura automática desde la landing del medical-booking-boilerplate.</p>` +
+    `<p style="margin-top:20px;font-size:12px;color:#999;">Captura automática desde la landing de ${config.fromName}.</p>` +
     `</div>`
 
   const confirmationHtml =
@@ -68,30 +146,27 @@ export async function sendLeadNotificationEmail(payload: LeadNotificationPayload
     `<h2 style="margin:0 0 16px;font-size:20px;">Hemos recibido tu consulta</h2>` +
     `<p style="font-size:15px;line-height:1.6;margin:0 0 12px;">Hola ${name},</p>` +
     `<p style="font-size:15px;line-height:1.6;margin:0 0 12px;">Gracias por tu interés. Nos pondremos en contacto contigo en menos de 24 horas laborables para agendar tu consulta inicial gratuita.</p>` +
-    `<p style="font-size:15px;line-height:1.6;margin:0 0 24px;">Mientras tanto, puedes explorar el sistema en funcionamiento:</p>` +
-    `<a href="https://medical-booking-boilerplate.vercel.app/#demo" style="display:inline-block;background:#111;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">Ver demo</a>` +
-    `<p style="margin-top:32px;font-size:13px;color:#666;">Un saludo,<br/>El equipo de GXA Studio</p>` +
+    `<p style="margin-top:32px;font-size:13px;color:#666;">Un saludo,<br/>El equipo de ${config.fromName}</p>` +
     `</div>`
 
   await Promise.all([
     transporter.sendMail({
-      from: `"GXA Studio" <${process.env.GMAIL_APP_USER}>`,
-      to: NOTIFICATION_INBOX,
+      from:    fromAddress,
+      to:      config.notificationInbox,
       replyTo: email,
       subject,
       text,
       html,
     }),
     transporter.sendMail({
-      from: `"GXA Studio" <${process.env.GMAIL_APP_USER}>`,
-      to: email,
-      replyTo: NOTIFICATION_INBOX,
-      subject: 'Hemos recibido tu consulta — GXA Studio',
+      from:    fromAddress,
+      to:      email,
+      replyTo: config.notificationInbox,
+      subject: `Hemos recibido tu consulta — ${config.fromName}`,
       text:
         `Hola ${name},\n\n` +
         `Gracias por tu interés. Nos pondremos en contacto contigo en menos de 24 horas laborables para agendar tu consulta inicial gratuita.\n\n` +
-        `Mientras tanto, puedes explorar el sistema en:\nhttps://medical-booking-boilerplate.vercel.app/#demo\n\n` +
-        `Un saludo,\nEl equipo de GXA Studio`,
+        `Un saludo,\nEl equipo de ${config.fromName}`,
       html: confirmationHtml,
     }),
   ])

@@ -168,12 +168,17 @@ echo "https://mbb-clinica-sonrisa.vercel.app" | npx vercel env add NEXT_PUBLIC_A
 echo "Europe/Madrid"                        | npx vercel env add NEXT_PUBLIC_DEFAULT_TIMEZONE production
 ```
 
-**Optional** (solo si este deploy debe enviar emails de notificación de leads a studiogxa@gmail.com):
+**Optional** (solo si este deploy debe enviar emails de notificación de leads).
+> Las credenciales SMTP **deben** apuntar a un servidor de correo **corporativo**.
+> Los proveedores gratuitos (gmail, outlook, yahoo, icloud, etc.) están bloqueados por validación en `lib/email/notifier.ts`.
 ```bash
-echo "studiogxa@gmail.com"                  | npx vercel env add GMAIL_APP_USER production
-echo "xxxx xxxx xxxx xxxx"                  | npx vercel env add GMAIL_APP_PASSWORD production
+echo "smtp.tu-dominio-corporativo.com"      | npx vercel env add CORPORATE_SMTP_HOST production
+echo "465"                                  | npx vercel env add CORPORATE_SMTP_PORT production
+echo "notificaciones@tu-dominio.com"        | npx vercel env add CORPORATE_SMTP_USER production
+echo "..."                                  | npx vercel env add CORPORATE_SMTP_PASSWORD production
+echo "leads@tu-dominio.com"                 | npx vercel env add CORPORATE_NOTIFICATION_INBOX production
+echo "GXA Studio"                           | npx vercel env add CORPORATE_SMTP_FROM_NAME production
 ```
-> El App Password se genera en https://myaccount.google.com/apppasswords (requiere 2-Step Verification activado).
 > En despliegues de cliente (clínicas), normalmente NO hace falta — solo en el deploy "central" que sirve la landing de venta.
 
 > Las claves Upstash pueden compartirse entre clientes — el rate-limit por IP funciona transversalmente; los prefijos por proyecto se diferencian gracias a las URLs de los rate limiters internos.

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input }  from '@/components/ui/input'
 import { Label }  from '@/components/ui/label'
 import { cn } from '@/lib/utils'
-import type { ServiceOption, DoctorOption } from './types'
+import type { ServiceOption, DoctorOption, PatientFormState } from './types'
 
 interface Props {
   service:     ServiceOption
@@ -21,6 +21,11 @@ interface Props {
   onBack:      () => void
   isLoading:   boolean
   error:       string | null
+  // UX-A7: optional controlled patient form. When provided, the component
+  // becomes controlled so the parent can persist values across modal closes
+  // (e.g., to let the patient book a second slot without re-typing).
+  patientForm?:        PatientFormState
+  onPatientFormChange?: (next: PatientFormState) => void
 }
 
 function formatSlotHuman(iso: string, timezone: string) {
@@ -37,11 +42,22 @@ function formatSlotHuman(iso: string, timezone: string) {
 
 export function StepPatient({
   service, doctor, timezone, slotStart, onSubmit, onBack, isLoading, error,
+  patientForm, onPatientFormChange,
 }: Props) {
-  const [name,      setName]      = useState('')
-  const [phone,     setPhone]     = useState('+34')
-  const [consented, setConsented] = useState(false)
-  const [touched,   setTouched]   = useState({ name: false, phone: false })
+  const [internalForm, setInternalForm] = useState<PatientFormState>(
+    () => patientForm ?? { name: '', phone: '+34', consented: false },
+  )
+  const form     = patientForm ?? internalForm
+  const setForm  = (next: PatientFormState) => {
+    if (onPatientFormChange) onPatientFormChange(next)
+    else setInternalForm(next)
+  }
+  const { name, phone, consented } = form
+  const setName      = (value: string)  => setForm({ ...form, name: value })
+  const setPhone     = (value: string)  => setForm({ ...form, phone: value })
+  const setConsented = (value: boolean) => setForm({ ...form, consented: value })
+
+  const [touched, setTouched] = useState({ name: false, phone: false })
 
   const nameValid  = name.trim().length >= 2
   const phoneValid = /^\+[1-9]\d{7,14}$/.test(phone.trim())
